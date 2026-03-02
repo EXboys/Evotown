@@ -15,6 +15,7 @@ export default {
           accent: "#38bdf8",
           gold: "#fbbf24",
         },
+        "evo-border": "#334155",
       },
       boxShadow: {
         "evo-panel": "0 4px 24px -4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",

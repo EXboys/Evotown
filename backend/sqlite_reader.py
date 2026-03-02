@@ -56,6 +56,15 @@ async def get_evolution_log(chat_root: str, limit: int = 100) -> list[dict[str, 
             return [dict(r) for r in rows]
 
 
+async def get_skills(agent_home: str) -> list[str]:
+    """列出 agent_home/.skills/_evolved 下的技能文件名"""
+    from pathlib import Path
+    evolved = Path(agent_home) / ".skills" / "_evolved"
+    if not evolved.exists():
+        return []
+    return [f.name for f in evolved.iterdir() if f.is_file() and f.suffix in (".sh", ".py", ".md")]
+
+
 async def get_rules(chat_root: str) -> list[dict[str, Any]]:
     """读取 rules.json（规则热力图数据）"""
     path = _rules_path(chat_root)

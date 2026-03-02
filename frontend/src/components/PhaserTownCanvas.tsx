@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import Phaser from "phaser";
 import { getPhaserConfig } from "../phaser/config";
 
-const GAME_HEIGHT = 560;
+const GAME_HEIGHT = 448;
 
 export function PhaserTownCanvas() {
   const parentRef = useRef<HTMLDivElement>(null);

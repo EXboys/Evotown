@@ -4,8 +4,8 @@ import TownScene from "./TownScene";
 export const getPhaserConfig = (parent: string | HTMLElement | null): Phaser.Types.Core.GameConfig => ({
   type: Phaser.AUTO,
   parent: parent || undefined,
-  width: 800,
-  height: 560,
+  width: 640,
+  height: 448,
   backgroundColor: "#1a1a2e",
   physics: {
     default: "arcade",

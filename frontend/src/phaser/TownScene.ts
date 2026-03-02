@@ -1,17 +1,17 @@
 import Phaser from "phaser";
 import { evotownEvents } from "./events";
 
-const PIXEL = 4; // 像素块大小，营造复古感
+const PIXEL = 3; // 像素块大小（缩小）
 
-/** 建筑配置 - 森林小镇风格 */
+/** 建筑配置 - 错落有致的森林小镇 */
 const BUILDINGS = {
-  square: { x: 400, y: 280, label: "中央广场", w: 9, h: 6, roof: "deck" as const, color: 0x8b7355 },
-  task: { x: 400, y: 420, label: "任务中心", w: 5, h: 4, roof: "thatched" as const, color: 0x6b5344 },
-  library: { x: 180, y: 140, label: "图书馆", w: 4, h: 5, roof: "thatched" as const, color: 0x5c4033 },
-  workshop: { x: 400, y: 140, label: "技能工坊", w: 5, h: 4, roof: "gable" as const, color: 0x6b5344 },
-  temple: { x: 620, y: 140, label: "进化神殿", w: 5, h: 5, roof: "mushroom" as const, color: 0x4a6741 },
-  archive: { x: 180, y: 420, label: "档案馆", w: 4, h: 4, roof: "thatched" as const, color: 0x5c4033 },
-  memory: { x: 620, y: 420, label: "记忆仓库", w: 4, h: 4, roof: "gable" as const, color: 0x6b5344 },
+  square: { x: 320, y: 224, label: "中央广场", w: 7, h: 5, roof: "deck" as const, color: 0x8b7355 },
+  task: { x: 340, y: 340, label: "任务中心", w: 4, h: 3, roof: "thatched" as const, color: 0x6b5344 },
+  library: { x: 120, y: 90, label: "图书馆", w: 3, h: 4, roof: "thatched" as const, color: 0x5c4033 },
+  workshop: { x: 300, y: 85, label: "技能工坊", w: 4, h: 3, roof: "gable" as const, color: 0x6b5344 },
+  temple: { x: 500, y: 100, label: "进化神殿", w: 4, h: 4, roof: "mushroom" as const, color: 0x4a6741 },
+  archive: { x: 110, y: 340, label: "档案馆", w: 3, h: 3, roof: "thatched" as const, color: 0x5c4033 },
+  memory: { x: 500, y: 335, label: "记忆仓库", w: 3, h: 3, roof: "gable" as const, color: 0x6b5344 },
 } as const;
 
 const TO_LABEL: Record<string, string> = {
@@ -31,7 +31,7 @@ function getSquareSpreadPos(agentId: string): { x: number; y: number } {
   const idx = Math.abs(hash) % 16;
   const col = idx % 4;
   const row = Math.floor(idx / 4);
-  const spacing = 28;
+  const spacing = 20;
   return {
     x: BUILDINGS.square.x + (col - 1.5) * spacing,
     y: BUILDINGS.square.y + (row - 1.5) * spacing,
@@ -91,20 +91,20 @@ export default class TownScene extends Phaser.Scene {
     pCtx.strokeRect(0, 0, 32, 32);
     this.textures.addCanvas("path", pathCanvas);
 
-    // 像素小人（白色底，用 setTint 上色）
+    // 像素小人（白色底，用 setTint 上色，缩小版）
     const charCanvas = document.createElement("canvas");
-    charCanvas.width = 48;
-    charCanvas.height = 28;
+    charCanvas.width = 36;
+    charCanvas.height = 21;
     const cCtx = charCanvas.getContext("2d")!;
-    const px = 4;
+    const px = 3;
     const rows = [
-      "....3333....",
-      "...333333...",
-      "....3333....",
-      "...333333...",
-      "....3333....",
-      "..3333.3333..",
-      "..3333.3333..",
+      "...3333....",
+      "..333333...",
+      "...3333....",
+      "..333333...",
+      "...3333....",
+      "..333.333..",
+      "..333.333..",
     ];
     cCtx.fillStyle = "#ffffff";
     rows.forEach((row, j) => {
@@ -266,6 +266,40 @@ export default class TownScene extends Phaser.Scene {
     ffCtx.fillRect(0, 0, 16, 16);
     this.textures.addCanvas("firefly", fireflyCanvas);
 
+    // 小鸟纹理（像素风 V 形剪影）
+    const birdCanvas = document.createElement("canvas");
+    birdCanvas.width = 20;
+    birdCanvas.height = 10;
+    const birdCtx = birdCanvas.getContext("2d")!;
+    birdCtx.fillStyle = "#334155";
+    birdCtx.beginPath();
+    birdCtx.moveTo(2, 5);
+    birdCtx.lineTo(8, 2);
+    birdCtx.lineTo(14, 5);
+    birdCtx.lineTo(18, 4);
+    birdCtx.lineTo(14, 6);
+    birdCtx.lineTo(8, 8);
+    birdCtx.closePath();
+    birdCtx.fill();
+    this.textures.addCanvas("bird", birdCanvas);
+
+    // 云朵纹理（柔和白灰）
+    const cloudCanvas = document.createElement("canvas");
+    cloudCanvas.width = 48;
+    cloudCanvas.height = 24;
+    const cloudCtx = cloudCanvas.getContext("2d")!;
+    const cloudGrad = cloudCtx.createRadialGradient(24, 12, 0, 24, 12, 24);
+    cloudGrad.addColorStop(0, "rgba(255, 255, 255, 0.9)");
+    cloudGrad.addColorStop(0.5, "rgba(240, 245, 255, 0.6)");
+    cloudGrad.addColorStop(1, "rgba(220, 230, 240, 0)");
+    cloudCtx.fillStyle = cloudGrad;
+    cloudCtx.beginPath();
+    cloudCtx.ellipse(12, 16, 10, 6, 0, 0, Math.PI * 2);
+    cloudCtx.ellipse(24, 12, 12, 8, 0, 0, Math.PI * 2);
+    cloudCtx.ellipse(36, 16, 10, 6, 0, 0, Math.PI * 2);
+    cloudCtx.fill();
+    this.textures.addCanvas("cloud", cloudCanvas);
+
     // 落叶纹理（小叶片）
     const leafCanvas = document.createElement("canvas");
     leafCanvas.width = 8;
@@ -279,28 +313,28 @@ export default class TownScene extends Phaser.Scene {
 
     // 自然光照：上亮下暗（天空光）+ 极淡暖色
     const lightCanvas = document.createElement("canvas");
-    lightCanvas.width = 800;
-    lightCanvas.height = 560;
+    lightCanvas.width = 640;
+    lightCanvas.height = 448;
     const lCtx2 = lightCanvas.getContext("2d")!;
-    const lightGrad = lCtx2.createLinearGradient(0, 0, 0, 560);
+    const lightGrad = lCtx2.createLinearGradient(0, 0, 0, 448);
     lightGrad.addColorStop(0, "rgba(255, 248, 240, 0.06)");   // 上方略亮
     lightGrad.addColorStop(0.5, "rgba(255, 245, 235, 0.02)");
     lightGrad.addColorStop(1, "rgba(0, 0, 0, 0.04)");         // 下方略暗
     lCtx2.fillStyle = lightGrad;
-    lCtx2.fillRect(0, 0, 800, 560);
+    lCtx2.fillRect(0, 0, 640, 448);
     this.textures.addCanvas("lightOverlay", lightCanvas);
 
     // 极淡暗角（仅四角微微收边）
     const vignetteCanvas = document.createElement("canvas");
-    vignetteCanvas.width = 800;
-    vignetteCanvas.height = 560;
+    vignetteCanvas.width = 640;
+    vignetteCanvas.height = 448;
     const vCtx = vignetteCanvas.getContext("2d")!;
-    const vigGrad = vCtx.createRadialGradient(400, 280, 200, 400, 280, 550);
+    const vigGrad = vCtx.createRadialGradient(320, 224, 160, 320, 224, 440);
     vigGrad.addColorStop(0.6, "rgba(0, 0, 0, 0)");
     vigGrad.addColorStop(0.9, "rgba(0, 0, 0, 0.06)");
     vigGrad.addColorStop(1, "rgba(0, 0, 0, 0.12)");
     vCtx.fillStyle = vigGrad;
-    vCtx.fillRect(0, 0, 800, 560);
+    vCtx.fillRect(0, 0, 640, 448);
     this.textures.addCanvas("vignette", vignetteCanvas);
 
   }
@@ -320,16 +354,16 @@ export default class TownScene extends Phaser.Scene {
     // 右下角：河流 + 水池
     this.drawRiverAndPond();
 
-    // 地面细节：小花、石头、蘑菇（草地和路边）
+    // 地面细节：小花、石头、蘑菇（草地和路边，缩小布局）
     const groundDetails = [
-      { tex: "flower", x: 100, y: 230, scale: 0.8 }, { tex: "flower2", x: 700, y: 210, scale: 0.9 },
-      { tex: "flower3", x: 110, y: 470, scale: 0.7 }, { tex: "flower", x: 690, y: 465, scale: 0.75 },
-      { tex: "flower2", x: 270, y: 100, scale: 0.8 }, { tex: "flower3", x: 530, y: 95, scale: 0.85 },
-      { tex: "flower", x: 265, y: 510, scale: 0.7 }, { tex: "flower2", x: 535, y: 515, scale: 0.8 },
-      { tex: "stone", x: 320, y: 250, scale: 1 }, { tex: "stone", x: 480, y: 350, scale: 0.9 },
-      { tex: "stone", x: 250, y: 300, scale: 0.85 }, { tex: "stone", x: 550, y: 280, scale: 0.95 },
-      { tex: "mushroom", x: 140, y: 350, scale: 0.9 }, { tex: "mushroom", x: 660, y: 320, scale: 0.85 },
-      { tex: "mushroom", x: 350, y: 450, scale: 0.8 }, { tex: "mushroom", x: 450, y: 150, scale: 0.9 },
+      { tex: "flower", x: 80, y: 180, scale: 0.6 }, { tex: "flower2", x: 560, y: 165, scale: 0.7 },
+      { tex: "flower3", x: 90, y: 375, scale: 0.55 }, { tex: "flower", x: 550, y: 370, scale: 0.6 },
+      { tex: "flower2", x: 215, y: 75, scale: 0.6 }, { tex: "flower3", x: 425, y: 72, scale: 0.65 },
+      { tex: "flower", x: 210, y: 408, scale: 0.55 }, { tex: "flower2", x: 428, y: 412, scale: 0.6 },
+      { tex: "stone", x: 255, y: 200, scale: 0.8 }, { tex: "stone", x: 385, y: 280, scale: 0.7 },
+      { tex: "stone", x: 200, y: 240, scale: 0.65 }, { tex: "stone", x: 440, y: 224, scale: 0.75 },
+      { tex: "mushroom", x: 110, y: 280, scale: 0.7 }, { tex: "mushroom", x: 528, y: 256, scale: 0.65 },
+      { tex: "mushroom", x: 280, y: 360, scale: 0.6 }, { tex: "mushroom", x: 360, y: 120, scale: 0.7 },
     ];
     groundDetails.forEach(({ tex, x, y, scale }) => {
       const detail = this.add.image(x, y, tex);
@@ -337,14 +371,14 @@ export default class TownScene extends Phaser.Scene {
       detail.setAlpha(0.9);
     });
 
-    // 装饰：树木（带轻微晃动）
+    // 装饰：树木（带轻微晃动，错落分布）
     const treePositions = [
-      { x: 120, y: 200 }, { x: 680, y: 200 }, { x: 120, y: 480 }, { x: 680, y: 480 },
-      { x: 280, y: 80 }, { x: 520, y: 80 }, { x: 280, y: 520 }, { x: 520, y: 520 },
+      { x: 95, y: 160 }, { x: 545, y: 160 }, { x: 95, y: 384 }, { x: 545, y: 384 },
+      { x: 224, y: 64 }, { x: 416, y: 64 }, { x: 224, y: 416 }, { x: 416, y: 416 },
     ];
     treePositions.forEach(({ x, y }, i) => {
-      const tree = this.add.image(x, y + 16, "tree");
-      tree.setScale(0.9);
+      const tree = this.add.image(x, y + 12, "tree");
+      tree.setScale(0.7);
       tree.setAlpha(0.85);
       tree.setOrigin(0.5, 1);
       this.tweens.add({
@@ -358,7 +392,7 @@ export default class TownScene extends Phaser.Scene {
     });
     // 装饰：木杆提灯（广场四角外）
     const lampPositions = [
-      { x: 300, y: 248 }, { x: 500, y: 248 }, { x: 300, y: 328 }, { x: 500, y: 328 },
+      { x: 240, y: 198 }, { x: 400, y: 198 }, { x: 240, y: 262 }, { x: 400, y: 262 },
     ];
     lampPositions.forEach(({ x, y }) => {
       const lamp = this.add.image(x, y, "lamp");
@@ -369,8 +403,8 @@ export default class TownScene extends Phaser.Scene {
 
     // 烟囱烟（有屋顶的建筑）
     const chimneyPositions = [
-      { x: 400, y: 395 }, { x: 180, y: 110 }, { x: 400, y: 110 },
-      { x: 180, y: 395 }, { x: 620, y: 395 },
+      { x: 340, y: 316 }, { x: 120, y: 88 }, { x: 300, y: 88 },
+      { x: 110, y: 316 }, { x: 500, y: 316 },
     ];
     chimneyPositions.forEach(({ x, y }) => {
       this.add.particles(x, y, "smoke", {
@@ -384,10 +418,10 @@ export default class TownScene extends Phaser.Scene {
       });
     });
 
-    // 建筑（带阴影）
+    // 建筑（带阴影，缩小）
     Object.entries(BUILDINGS).forEach(([key, b]) => {
       const container = this.add.container(b.x, b.y);
-      const s = PIXEL * 4;
+      const s = PIXEL * 3;
       const bw = b.w * s;
       const bh = b.h * s;
 
@@ -404,13 +438,13 @@ export default class TownScene extends Phaser.Scene {
 
       const labelBg = this.add.graphics();
       labelBg.fillStyle(0x2d2018, 0.9);
-      labelBg.fillRoundedRect(-bw / 2 - 4, bh / 2 + 2, bw + 8, 20, 4);
+      labelBg.fillRoundedRect(-bw / 2 - 3, bh / 2 + 1, bw + 6, 16, 3);
       labelBg.lineStyle(1, 0x6b5344, 0.7);
-      labelBg.strokeRoundedRect(-bw / 2 - 4, bh / 2 + 2, bw + 8, 20, 4);
+      labelBg.strokeRoundedRect(-bw / 2 - 3, bh / 2 + 1, bw + 6, 16, 3);
       container.add(labelBg);
 
-      const label = this.add.text(0, bh / 2 + 12, b.label, {
-        fontSize: "11px",
+      const label = this.add.text(0, bh / 2 + 9, b.label, {
+        fontSize: "9px",
         color: "#e2e8f0",
         fontStyle: "bold",
       }).setOrigin(0.5);
@@ -450,14 +484,78 @@ export default class TownScene extends Phaser.Scene {
       frequency: 1500,
     });
 
-    // 精致标题栏
+    // 云朵飘过（同屏云朵同向，风向每 45-60 秒换一次）
+    let windFromLeft = Math.random() > 0.5;
+    this.time.addEvent({
+      delay: 45000 + Math.random() * 15000,
+      callback: () => { windFromLeft = Math.random() > 0.5; },
+      loop: true,
+    });
+    const spawnCloudBatch = () => {
+      const count = 1 + Math.floor(Math.random() * 2); // 1-2 朵
+      for (let i = 0; i < count; i++) {
+        this.time.delayedCall(i * 4000, () => {
+          const y = 45 + Math.random() * 70;
+          const scale = 0.5 + Math.random() * 0.4;
+          const cloud = this.add.image(windFromLeft ? -40 : w + 40, y, "cloud");
+          cloud.setScale(scale);
+          cloud.setAlpha(0.65);
+          cloud.setDepth(500);
+          cloud.setScrollFactor(0);
+          this.tweens.add({
+            targets: cloud,
+            x: windFromLeft ? w + 60 : -60,
+            duration: 14000 + Math.random() * 6000,
+            ease: "Linear",
+            onComplete: () => cloud.destroy(),
+          });
+        });
+      }
+    };
+    spawnCloudBatch();
+    this.time.addEvent({ delay: 30000 + Math.random() * 20000, callback: spawnCloudBatch, loop: true });
+
+    // 小鸟飞过（偶尔出现，有时 2-3 只结伴）
+    const spawnBirdBatch = () => {
+      const fromLeft = Math.random() > 0.5;
+      const count = Math.random() < 0.4 ? 1 : 2 + Math.floor(Math.random() * 2); // 40% 单只，60% 2-3 只
+      for (let i = 0; i < count; i++) {
+        this.time.delayedCall(i * 400, () => {
+          const y = 55 + Math.random() * 100;
+          const bird = this.add.image(fromLeft ? -25 : w + 25, y, "bird");
+          bird.setScale(0.7 + Math.random() * 0.3);
+          bird.setAlpha(0.8);
+          bird.setDepth(600);
+          bird.setScrollFactor(0);
+          if (!fromLeft) bird.setFlipX(true);
+          this.tweens.add({
+            targets: bird,
+            x: fromLeft ? w + 35 : -35,
+            duration: 2800 + Math.random() * 1200,
+            ease: "Linear",
+            onComplete: () => bird.destroy(),
+          });
+          this.tweens.add({
+            targets: bird,
+            y: bird.y + (Math.random() - 0.5) * 30,
+            duration: 1400,
+            yoyo: true,
+            repeat: 1,
+            ease: "Sine.easeInOut",
+          });
+        });
+      }
+    };
+    this.time.addEvent({ delay: 18000 + Math.random() * 12000, callback: spawnBirdBatch, loop: true });
+
+    // 精致标题栏（缩小）
     const titleBg = this.add.graphics();
     titleBg.fillStyle(0x1e293b, 0.96);
-    titleBg.fillRoundedRect(0, 0, w, 40, 0);
+    titleBg.fillRoundedRect(0, 0, w, 32, 0);
     titleBg.lineStyle(1, 0x334155, 0.6);
-    titleBg.lineBetween(0, 40, w, 40);
-    this.add.text(w / 2, 20, "◇ EVOTOWN 进化小镇  ·  智能体进化沙盒", {
-      fontSize: "14px",
+    titleBg.lineBetween(0, 32, w, 32);
+    this.add.text(w / 2, 16, "◇ EVOTOWN 进化小镇  ·  智能体进化沙盒", {
+      fontSize: "12px",
       color: "#cbd5e1",
       fontStyle: "bold",
     }).setOrigin(0.5);
@@ -479,145 +577,149 @@ export default class TownScene extends Phaser.Scene {
     evotownEvents.on("evolution_event", (d) => this.onEvolutionEvent(d));
   }
 
-  /** 游戏风格道路：正交网格，横竖路网 + 路口 */
+  /** 沿曲线绘制道路瓦片：贝塞尔二次曲线，带曲折感 */
   private drawPaths() {
     const g = this.add.graphics();
-    const STEP = 40; // 道路网格步长
+    const STEP = 24; // 道路瓦片步长（缩小）
+    const TILE = 20; // 瓦片半宽
     const drawn = new Set<string>();
-    const key = (x: number, y: number) => `${Math.round(x / STEP) * STEP},${Math.round(y / STEP) * STEP}`;
+    const key = (x: number, y: number) => `${Math.round(x / 4)},${Math.round(y / 4)}`;
     const drawTile = (x: number, y: number) => {
       const k = key(x, y);
       if (drawn.has(k)) return;
       drawn.add(k);
       g.fillStyle(0x5c4033, 0.95);
-      g.fillRect(x - 16, y - 16, 32, 32);
+      g.fillRect(x - TILE / 2, y - TILE / 2, TILE, TILE);
       g.fillStyle(0x6b5244, 0.5);
-      g.fillRect(x - 14, y - 14, 4, 4);
-      g.fillRect(x + 6, y + 6, 4, 4);
+      g.fillRect(x - TILE / 2 + 2, y - TILE / 2 + 2, 3, 3);
+      g.fillRect(x + TILE / 2 - 5, y + TILE / 2 - 5, 3, 3);
     };
-    /** 沿水平或垂直线段绘制道路瓦片（正交） */
-    const drawSegment = (x1: number, y1: number, x2: number, y2: number) => {
-      const isHorizontal = Math.abs(y2 - y1) < Math.abs(x2 - x1);
-      const xMin = Math.min(x1, x2);
-      const xMax = Math.max(x1, x2);
-      const yMin = Math.min(y1, y2);
-      const yMax = Math.max(y1, y2);
-      if (isHorizontal) {
-        const y = Math.round((y1 + y2) / 2 / STEP) * STEP;
-        for (let x = Math.floor(xMin / STEP) * STEP; x <= xMax; x += STEP) {
-          drawTile(x, y);
+    /** 二次贝塞尔曲线采样点: P(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2 */
+    const quadPoints = (x0: number, y0: number, cx: number, cy: number, x2: number, y2: number, n: number) => {
+      const pts: { x: number; y: number }[] = [];
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const mt = 1 - t;
+        pts.push({
+          x: mt * mt * x0 + 2 * mt * t * cx + t * t * x2,
+          y: mt * mt * y0 + 2 * mt * t * cy + t * t * y2,
+        });
+      }
+      return pts;
+    };
+    /** 沿曲线绘制道路 */
+    const drawCurvedPath = (x0: number, y0: number, cx: number, cy: number, x2: number, y2: number) => {
+      const pts = quadPoints(x0, y0, cx, cy, x2, y2, 20);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const steps = Math.max(1, Math.floor(len / STEP));
+        for (let j = 0; j <= steps; j++) {
+          const t = j / steps;
+          drawTile(a.x + dx * t, a.y + dy * t);
         }
-        drawTile(xMax, y); // 确保端点
-      } else {
-        const x = Math.round((x1 + x2) / 2 / STEP) * STEP;
-        for (let y = Math.floor(yMin / STEP) * STEP; y <= yMax; y += STEP) {
-          drawTile(x, y);
-        }
-        drawTile(x, yMax); // 确保端点
+      }
+    };
+    /** 折线路径（带弯曲拐点） */
+    const drawPolyPath = (points: { x: number; y: number }[]) => {
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i], b = points[i + 1];
+        const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+        const perpX = -(b.y - a.y), perpY = b.x - a.x;
+        const len = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+        const bend = (i % 2 === 0 ? 1 : -1) * 15; // 交替弯曲
+        const cx = midX + (perpX / len) * bend;
+        const cy = midY + (perpY / len) * bend;
+        drawCurvedPath(a.x, a.y, cx, cy, b.x, b.y);
       }
     };
 
-    // 道路网格布局（正交，类似游戏城镇）
-    // 上排横路 y=200：连接 图书馆-工坊-神殿
-    drawSegment(140, 200, 660, 200);
-    // 下排横路 y=380：连接 档案馆-任务中心-记忆仓库
-    drawSegment(140, 380, 660, 380);
-    // 中央纵路 x=400：主脊，贯穿上下
-    drawSegment(400, 160, 400, 460);
-    // 左侧纵路 x=240：连接上排与下排左侧
-    drawSegment(240, 200, 240, 380);
-    // 右侧纵路 x=560：连接上排与下排右侧
-    drawSegment(560, 200, 560, 380);
-    // 广场横路 y=280：中央广场前的短横路
-    drawSegment(360, 280, 440, 280);
-    // 建筑入口支路：从主路到建筑门口
-    drawSegment(180, 200, 180, 170); // 图书馆
-    drawSegment(620, 200, 620, 170); // 神殿
-    drawSegment(180, 380, 180, 420); // 档案馆
-    drawSegment(620, 380, 620, 420); // 记忆仓库
-
-    // 路口装饰（交叉点加深）
-    const junctions = [
-      [240, 200], [400, 200], [560, 200],
-      [240, 280], [400, 280], [560, 280],
-      [240, 380], [400, 380], [560, 380],
-    ];
-    junctions.forEach(([jx, jy]) => {
-      drawTile(jx, jy);
-      g.fillStyle(0x4a3728, 0.5);
-      g.fillRect(jx - 18, jy - 18, 4, 4);
-      g.fillRect(jx + 12, jy + 12, 4, 4);
-    });
-
-    // 道路边缘描边
-    g.lineStyle(1, 0x3d2e24, 0.6);
-    const segments: Array<[number, number, number, number]> = [
-      [140, 200, 660, 200], [140, 380, 660, 380],
-      [400, 160, 400, 460], [240, 200, 240, 380], [560, 200, 560, 380],
-      [360, 280, 440, 280],
-      [180, 170, 180, 200], [620, 170, 620, 200],
-      [180, 380, 180, 420], [620, 380, 620, 420],
-    ];
-    segments.forEach(([x1, y1, x2, y2]) => g.lineBetween(x1, y1, x2, y2));
+    // 曲折道路布局（错落连接各建筑）
+    // 上排蜿蜒路：图书馆 → 工坊 → 神殿
+    drawPolyPath([
+      { x: 120, y: 115 }, { x: 210, y: 95 }, { x: 300, y: 100 }, { x: 400, y: 92 }, { x: 500, y: 105 },
+    ]);
+    // 下排蜿蜒路：档案馆 → 任务中心 → 记忆仓库
+    drawPolyPath([
+      { x: 110, y: 355 }, { x: 225, y: 345 }, { x: 340, y: 350 }, { x: 420, y: 342 }, { x: 500, y: 338 },
+    ]);
+    // 左侧曲折纵路：图书馆下 → 档案馆上
+    drawPolyPath([
+      { x: 135, y: 115 }, { x: 125, y: 200 }, { x: 118, y: 280 }, { x: 110, y: 355 },
+    ]);
+    // 右侧曲折纵路：神殿下 → 记忆仓库上
+    drawPolyPath([
+      { x: 500, y: 105 }, { x: 510, y: 200 }, { x: 505, y: 270 }, { x: 500, y: 338 },
+    ]);
+    // 中央 S 形路：连接上下
+    drawPolyPath([
+      { x: 320, y: 92 }, { x: 330, y: 160 }, { x: 315, y: 224 }, { x: 335, y: 290 }, { x: 340, y: 350 },
+    ]);
+    // 广场前短弯道
+    drawCurvedPath(280, 224, 320, 210, 360, 224);
+    // 建筑入口支路（小弯）
+    drawCurvedPath(120, 115, 118, 100, 120, 85);   // 图书馆
+    drawCurvedPath(500, 105, 505, 88, 500, 75);    // 神殿
+    drawCurvedPath(110, 355, 105, 365, 110, 375);  // 档案馆
+    drawCurvedPath(500, 338, 508, 348, 500, 358); // 记忆仓库
   }
 
-  /** 右下角：河流蜿蜒流入水池 */
+  /** 右下角：河流蜿蜒流入水池（缩小版） */
   private drawRiverAndPond() {
     const g = this.add.graphics();
 
-    // 河流（从右边缘蜿蜒流入，用折线模拟曲线）
+    // 河流（从右边缘蜿蜒流入）
     g.fillStyle(0x2d6b5a, 0.95);
     g.beginPath();
-    g.moveTo(800, 250);
-    g.lineTo(790, 320);
-    g.lineTo(770, 400);
-    g.lineTo(720, 470);
-    g.lineTo(650, 520);
-    g.lineTo(600, 560);
-    g.lineTo(800, 560);
-    g.lineTo(800, 250);
+    g.moveTo(640, 200);
+    g.lineTo(632, 256);
+    g.lineTo(616, 320);
+    g.lineTo(576, 376);
+    g.lineTo(520, 416);
+    g.lineTo(480, 448);
+    g.lineTo(640, 448);
+    g.lineTo(640, 200);
     g.closePath();
-    g.fill();
+    g.fillPath();
 
-    // 河流中层（略浅，形成河岸感）
     g.fillStyle(0x3d8270, 0.9);
     g.beginPath();
-    g.moveTo(800, 280);
-    g.lineTo(785, 350);
-    g.lineTo(755, 430);
-    g.lineTo(710, 480);
-    g.lineTo(670, 510);
-    g.lineTo(800, 510);
-    g.lineTo(800, 280);
+    g.moveTo(640, 224);
+    g.lineTo(628, 280);
+    g.lineTo(604, 344);
+    g.lineTo(568, 384);
+    g.lineTo(536, 408);
+    g.lineTo(640, 408);
+    g.lineTo(640, 224);
     g.closePath();
-    g.fill();
+    g.fillPath();
 
-    // 河流中心（高光水流）
     g.fillStyle(0x4a9c8a, 0.6);
     g.beginPath();
-    g.moveTo(800, 320);
-    g.lineTo(780, 390);
-    g.lineTo(745, 455);
-    g.lineTo(700, 495);
-    g.lineTo(800, 495);
-    g.lineTo(800, 320);
+    g.moveTo(640, 256);
+    g.lineTo(624, 312);
+    g.lineTo(596, 364);
+    g.lineTo(560, 396);
+    g.lineTo(640, 396);
+    g.lineTo(640, 256);
     g.closePath();
-    g.fill();
+    g.fillPath();
 
-    // 水池（右下角，河流汇入）
+    // 水池（右下角）
     g.fillStyle(0x2d6b5a, 0.95);
-    g.fillEllipse(680, 520, 160, 100);
+    g.fillEllipse(544, 416, 128, 80);
     g.fillStyle(0x3d8270, 0.9);
-    g.fillEllipse(670, 510, 120, 75);
+    g.fillEllipse(536, 408, 96, 60);
     g.fillStyle(0x4a9c8a, 0.5);
-    g.fillEllipse(655, 505, 70, 45);
+    g.fillEllipse(524, 404, 56, 36);
     g.fillStyle(0xffffff, 0.15);
-    g.fillEllipse(640, 500, 30, 15);
+    g.fillEllipse(512, 400, 24, 12);
   }
 
-  /** 森林小镇风格建筑 */
+  /** 森林小镇风格建筑（缩小版） */
   private drawPixelBuilding(g: Phaser.GameObjects.Graphics, w: number, h: number, roof: string, _color: number) {
-    const s = PIXEL * 4;
+    const s = PIXEL * 3;
     const bw = w * s;
     const bh = h * s;
 
@@ -765,10 +867,10 @@ export default class TownScene extends Phaser.Scene {
       const spawn = getSquareSpreadPos(agentId);
       const sprite = this.add.sprite(spawn.x, spawn.y, "char");
       sprite.setTint(color);
-      sprite.setScale(1.3);
+      sprite.setScale(0.9);
 
-      const label = this.add.text(spawn.x, spawn.y + 24, agentId, {
-        fontSize: "10px",
+      const label = this.add.text(spawn.x, spawn.y + 18, agentId, {
+        fontSize: "9px",
         color: "#e2e8f0",
         fontStyle: "bold",
       }).setOrigin(0.5).setPadding(4, 2);
@@ -815,7 +917,7 @@ export default class TownScene extends Phaser.Scene {
         agent.sprite.x += Phaser.Math.Clamp(dx, -speed, speed);
         agent.sprite.y += Phaser.Math.Clamp(dy, -speed, speed);
         agent.label.x = agent.sprite.x;
-        agent.label.y = agent.sprite.y + 24;
+        agent.label.y = agent.sprite.y + 18;
       }
     });
   }

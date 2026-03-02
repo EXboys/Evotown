@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from economy_config import load_economy_config
 from models import AgentCreate, AgentInfo, TaskInject, TaskBatch
 from process_manager import ProcessManager
-from sqlite_reader import get_decisions, get_metrics, get_rules
+from sqlite_reader import get_decisions, get_evolution_log, get_metrics, get_rules, get_skills
 from log_watcher import start_watching
 
 
@@ -234,6 +234,23 @@ async def get_agent_rules(agent_id: str):
     if agent_id not in agents:
         return []
     return await get_rules(agents[agent_id]["chat_dir"])
+
+
+@app.get("/agents/{agent_id}/evolution_log")
+async def get_agent_evolution_log(agent_id: str, limit: int = 100):
+    """evolution_log 表（进化时间线）"""
+    if agent_id not in agents:
+        return []
+    rows = await get_evolution_log(agents[agent_id]["chat_dir"], limit)
+    return list(reversed(rows))  # 时间正序
+
+
+@app.get("/agents/{agent_id}/skills")
+async def get_agent_skills(agent_id: str):
+    """列出 _evolved 技能文件"""
+    if agent_id not in agents:
+        return []
+    return await get_skills(agents[agent_id]["agent_home"])
 
 
 @app.websocket("/ws")
