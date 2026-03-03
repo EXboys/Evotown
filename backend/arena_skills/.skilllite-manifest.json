@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "skills": {
+    "agent-browser": {
+      "name": "agent-browser",
+      "source": "evotown-arena",
+      "version": null,
+      "hash": "a4d92219d816bda21c9182b06bf8e9f0a836fd0e7d058c2b4dc254cd444c5e11",
+      "signature_status": "UNSIGNED",
+      "trust_tier": "COMMUNITY",
+      "trust_score": 56,
+      "tier_reason": ["evotown arena seed", "unsigned package"],
+      "tier_updated_at": "2026-03-04T00:00:00.000000Z",
+      "installed_at": "2026-03-04T00:00:00.000000Z",
+      "admission_risk": "safe"
+    },
+    "find-skills": {
+      "name": "find-skills",
+      "source": "evotown-arena",
+      "version": null,
+      "hash": "c1720ff6ac18832a05d91cd913eee8781310e9f376ce77b8d5fc25a32e530a89",
+      "signature_status": "UNSIGNED",
+      "trust_tier": "COMMUNITY",
+      "trust_score": 63,
+      "tier_reason": ["evotown arena seed", "vercel-labs/skills"],
+      "tier_updated_at": "2026-03-04T00:00:00.000000Z",
+      "installed_at": "2026-03-04T00:00:00.000000Z",
+      "admission_risk": "safe"
+    },
+    "calculator": {
+      "name": "calculator",
+      "source": "evotown-arena",
+      "version": "1.0",
+      "hash": "8eab280cc2bdf419fd341a56f9cb1c4cdcab7c3c7ba61f356a9fd580315b8d64",
+      "signature_status": "UNSIGNED",
+      "trust_tier": "COMMUNITY",
+      "trust_score": 56,
+      "tier_reason": ["evotown arena seed", "unsigned package"],
+      "tier_updated_at": "2026-03-04T00:00:00.000000Z",
+      "installed_at": "2026-03-04T00:00:00.000000Z",
+      "admission_risk": "safe"
+    },
+    "http-request": {
+      "name": "http-request",
+      "source": "evotown-arena",
+      "version": "1.0",
+      "hash": "f3e2a472380bdf404d3bd4fb8e1bc6cb2ad7132d1e7c8dc49954368b84f4a487",
+      "signature_status": "UNSIGNED",
+      "trust_tier": "COMMUNITY",
+      "trust_score": 63,
+      "tier_reason": ["evotown arena seed", "unsigned package"],
+      "tier_updated_at": "2026-03-04T00:00:00.000000Z",
+      "installed_at": "2026-03-04T00:00:00.000000Z",
+      "admission_risk": "safe"
+    },
+    "skill-creator": {
+      "name": "skill-creator",
+      "source": "evotown-arena",
+      "version": null,
+      "hash": "4c344c56c980325791982e8bb4182d2f044a3118849fc91914c3e8b5fbbe91a2",
+      "signature_status": "UNSIGNED",
+      "trust_tier": "COMMUNITY",
+      "trust_score": 56,
+      "tier_reason": ["evotown arena seed", "unsigned package"],
+      "tier_updated_at": "2026-03-04T00:00:00.000000Z",
+      "installed_at": "2026-03-04T00:00:00.000000Z",
+      "admission_risk": "safe"
+    }
+  }
+}

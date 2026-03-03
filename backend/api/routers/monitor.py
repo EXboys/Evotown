@@ -2,11 +2,18 @@
 from fastapi import APIRouter
 
 from core.deps import experiment_id, monitor
+from token_usage import get_usage
 from infra.execution_log import load_all_refusals
 from infra.task_history import compute_stats_from_history, load_task_history
 from services import agent_service
 
 router = APIRouter(prefix="/monitor", tags=["monitor"])
+
+
+@router.get("/token_usage")
+async def token_usage():
+    """Token 消耗统计（裁判评分 + 任务生成等本进程 LLM 调用，不含 Agent 执行）"""
+    return get_usage()
 
 
 @router.get("/active")

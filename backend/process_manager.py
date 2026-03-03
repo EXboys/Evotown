@@ -164,13 +164,16 @@ class ProcessManager:
         (chat_root / "plans").mkdir(parents=True, exist_ok=True)
         (chat_root / "output").mkdir(parents=True, exist_ok=True)
 
-        # 每个 agent 独立 .skills：从 workspace 复制种子技能，进化产物写入 agent_home/.skills/_evolved
+        # 每个 agent 独立 .skills：从 arena_skills 或 workspace 复制种子技能，进化产物写入 agent_home/.skills/_evolved
         skills_dir = agent_home / ".skills"
-        workspace_skills = Path.cwd() / ".skills"
+        # 优先使用 evotown 内置 arena_skills（http-request + agent-browser + skill-creator + calculator）
+        _arena_skills = Path(__file__).resolve().parent / "arena_skills"
+        workspace_skills = _arena_skills if _arena_skills.exists() else (Path.cwd() / ".skills")
         if not workspace_skills.exists():
             workspace_skills = Path.cwd() / "skills"
         if not skills_dir.exists() and workspace_skills.exists():
             shutil.copytree(workspace_skills, skills_dir, dirs_exist_ok=True)
+            logger.info("Seeded agent .skills from %s", workspace_skills.name)
         elif not skills_dir.exists():
             skills_dir.mkdir(parents=True, exist_ok=True)
 

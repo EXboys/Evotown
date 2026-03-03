@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { evotownEvents } from "../phaser/events";
 
 /** 与 TownScene 一致的 agent 颜色（按 agentId 哈希） */
@@ -31,6 +31,7 @@ export function ObserverPanel() {
   const setSelectedAgent = useEvotownStore((s) => s.setSelectedAgent);
   const setExperimentInfo = useEvotownStore((s) => s.setExperimentInfo);
   const experimentInfo = useEvotownStore((s) => s.experimentInfo);
+  const [tokenUsage, setTokenUsage] = useState<{ prompt_tokens: number; completion_tokens: number; total_tokens: number } | null>(null);
 
   useEffect(() => {
     fetch("/config/experiment")
@@ -39,7 +40,30 @@ export function ObserverPanel() {
       .catch(() => {});
   }, [setExperimentInfo]);
 
+  useEffect(() => {
+    const refresh = () => {
+      fetch("/monitor/token_usage")
+        .then((r) => r.json())
+        .then(setTokenUsage)
+        .catch(() => setTokenUsage(null));
+    };
+    refresh();
+    const id = setInterval(refresh, 15_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 数据刷新后恢复滚动位置，避免自动跳到顶部
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (el && savedScrollTop.current > 0) {
+      el.scrollTop = savedScrollTop.current;
+    }
+  }, [agents, evolutionEvents]);
+
   // Agent 同步已由 useAgentSync 统一处理，ObserverPanel 仅消费 store
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const savedScrollTop = useRef(0);
 
   const [createSoulType, setCreateSoulType] = useState<"conservative" | "aggressive" | "balanced">("balanced");
   const createAgent = async () => {
@@ -137,11 +161,18 @@ export function ObserverPanel() {
             </h2>
             <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5">监控与操控智能体</p>
           </div>
-          {experimentInfo.experiment_id && (
-            <p className="text-[10px] text-slate-600 font-mono truncate sm:max-w-[180px]" title={experimentInfo.experiment_id}>
-              实验: {experimentInfo.experiment_id}
-            </p>
-          )}
+          <div className="flex flex-col items-end gap-0.5">
+            {experimentInfo.experiment_id && (
+              <p className="text-[10px] text-slate-600 font-mono truncate sm:max-w-[180px]" title={experimentInfo.experiment_id}>
+                实验: {experimentInfo.experiment_id}
+              </p>
+            )}
+            {tokenUsage && tokenUsage.total_tokens > 0 && (
+              <p className="text-[10px] text-slate-500" title={`输入 ${tokenUsage.prompt_tokens.toLocaleString()} / 输出 ${tokenUsage.completion_tokens.toLocaleString()}`}>
+                Token: {(tokenUsage.total_tokens / 1000).toFixed(1)}K
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -175,7 +206,11 @@ export function ObserverPanel() {
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-4 sm:space-y-5">
+      <div
+        ref={scrollContainerRef}
+        onScroll={(e) => { savedScrollTop.current = (e.target as HTMLDivElement).scrollTop; }}
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 space-y-4 sm:space-y-5"
+      >
         {tab === "agents" && (
           <section className="space-y-3">
             <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider">智能体</h3>

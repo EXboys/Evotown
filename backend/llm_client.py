@@ -10,6 +10,8 @@ from typing import Any
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+from token_usage import add_usage
+
 load_dotenv()
 logger = logging.getLogger("evotown.llm")
 
@@ -80,6 +82,13 @@ async def chat_completion(
         kwargs["response_format"] = response_format
 
     response = await client.chat.completions.create(**kwargs)
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        pt = getattr(usage, "prompt_tokens", 0) or 0
+        ct = getattr(usage, "completion_tokens", 0) or 0
+        if pt or ct:
+            add_usage(prompt_tokens=pt, completion_tokens=ct)
+
     content = response.choices[0].message.content if response.choices else None
 
     if not content or not isinstance(content, str):

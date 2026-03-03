@@ -81,6 +81,7 @@ class TaskDispatcher:
     """任务分发器"""
     _task_pool: list[TaskItem] = field(default_factory=lambda: list(SEED_TASKS))
     _running: bool = False
+    _stop_event: asyncio.Event | None = field(default=None, repr=False)
     _interval: float = 30.0  # 分发检查间隔（秒）
     _min_pool_size: int = 5
     _inject_fn: Callable[[str, str, str], Awaitable[bool]] | None = None  # (agent_id, task, difficulty)
@@ -106,11 +107,16 @@ class TaskDispatcher:
         if self._running:
             return
         self._running = True
+        if self._stop_event is None:
+            self._stop_event = asyncio.Event()
+        self._stop_event.clear()
         logger.info("Task dispatcher started (interval=%.1fs)", self._interval)
         asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
         self._running = False
+        if self._stop_event is not None:
+            self._stop_event.set()
         logger.info("Task dispatcher stopped")
 
     async def _loop(self) -> None:
@@ -119,7 +125,16 @@ class TaskDispatcher:
                 await self._tick()
             except Exception as e:
                 logger.error("Dispatcher tick error: %s", e)
-            await asyncio.sleep(self._interval)
+            if not self._running:
+                break
+            # 可中断的 sleep：stop() 调用 set() 后立即唤醒，否则等待 interval
+            if self._stop_event is not None:
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=self._interval)
+                except asyncio.TimeoutError:
+                    pass
+            else:
+                await asyncio.sleep(self._interval)
 
     def return_task_to_pool(self, task_text: str, difficulty: str) -> None:
         """将任务放回任务池（agent 拒绝时调用）。高拒绝任务保留更久，代表生态未解决的能力缺口。"""

@@ -1,0 +1,10 @@
+{
+  "compatibility_hash": "b445a4d5912a0f68ecba31198381d6a8d699cf1de2d6dc856ae740dcefd5903f",
+  "language": "python",
+  "resolved_at": "2026-02-18T14:48:05.192807+00:00",
+  "resolved_packages": [
+    "html2text",
+    "requests"
+  ],
+  "resolver": "whitelist"
+}

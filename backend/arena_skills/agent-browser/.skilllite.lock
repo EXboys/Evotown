@@ -1,0 +1,9 @@
+{
+  "compatibility_hash": "1df71e41aaf79bebcf7ed8d37584eaedc8535115887a69251459cf9757bf0341",
+  "language": "node",
+  "resolved_at": "2026-02-22T07:19:01.744383+00:00",
+  "resolved_packages": [
+    "agent-browser"
+  ],
+  "resolver": "whitelist"
+}
