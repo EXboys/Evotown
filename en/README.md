@@ -2,7 +2,7 @@
 
 Puts evolution engines (e.g. SkillLite) in a controlled environment for **evolution effect validation**. Economy rules are configurable, reproducible, fully local, and **do not depend on virtual/cryptocurrency**.
 
-**Language**: [English](en/README.md) | [中文](zh-CN/README.md)
+[中文](../zh-CN/README.md)
 
 ## Prerequisites
 
@@ -51,13 +51,18 @@ Query current config via `GET /config/economy`.
 ```
 evotown/
 ├── backend/              # FastAPI backend
-├── frontend/             # React + Phaser 3 frontend
+│   ├── main.py           # API + WebSocket
+│   ├── economy_config.py # Economy rules config
+│   ├── evotown_config.json  # Editable rules (optional)
+│   ├── process_manager.py
+│   ├── sqlite_reader.py
+│   └── ...
+├── frontend/         # React + Phaser 3 frontend
+│   └── src/
 ├── docs/
-│   ├── en/               # English docs
-│   └── zh-CN/            # 中文文档
-├── en/README.md          # English README
-├── zh-CN/README.md       # 中文 README
-└── README.md             # This file (default)
+│   ├── en/           # English docs
+│   └── zh-CN/        # 中文文档
+└── README.md
 ```
 
 ## Release Notes
@@ -71,8 +76,8 @@ git subtree split -P evotown -b evotown-main
 
 ## Related Docs
 
-- [Reward Mechanism](docs/en/REWARD_MECHANISM.md) | [奖励机制](docs/zh-CN/REWARD_MECHANISM.md)
-- [Agent Task Acceptance](docs/en/AGENT_TASK_ACCEPTANCE_ANALYSIS.md) | [任务接受逻辑](docs/zh-CN/AGENT_TASK_ACCEPTANCE_ANALYSIS.md)
-- [Evolution Mechanism](docs/en/EVOLUTION_MECHANISM_ANALYSIS.md) | [进化机制](docs/zh-CN/EVOLUTION_MECHANISM_ANALYSIS.md)
-- [13-EVOLUTION-ARENA.md](../todo/13-EVOLUTION-ARENA.md) — Full design
-- [12-SELF-EVOLVING-ENGINE.md](../todo/12-SELF-EVOLVING-ENGINE.md) — Evolution engine
+- [REWARD_MECHANISM.md](../docs/en/REWARD_MECHANISM.md) — Reward mechanism
+- [AGENT_TASK_ACCEPTANCE_ANALYSIS.md](../docs/en/AGENT_TASK_ACCEPTANCE_ANALYSIS.md) — Agent task acceptance logic
+- [EVOLUTION_MECHANISM_ANALYSIS.md](../docs/en/EVOLUTION_MECHANISM_ANALYSIS.md) — Evolution mechanism
+- [13-EVOLUTION-ARENA.md](../../todo/13-EVOLUTION-ARENA.md) — Full design
+- [12-SELF-EVOLVING-ENGINE.md](../../todo/12-SELF-EVOLVING-ENGINE.md) — Evolution engine

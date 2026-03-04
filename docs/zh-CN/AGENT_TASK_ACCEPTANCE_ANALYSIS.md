@@ -174,3 +174,5 @@ Phase 2 — 决策
 | 每 agent 定制 Soul | EvoTown | 否，游戏 |
 
 **核心原则**：SkillLite 只提供"可注入任意 context"的能力；Arena 规则、任务接受逻辑、Soul 模板全部在 EvoTown 实现。
+
+[English](../en/AGENT_TASK_ACCEPTANCE_ANALYSIS.md)

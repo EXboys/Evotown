@@ -153,3 +153,5 @@ dispatch_inject(agent_id, task, difficulty)
 | **进化奖励无上限** | 可加单日/单次进化奖励上限，防刷 |
 | **难度未参与奖励** | 可让 hard 任务成功时奖励更高 |
 | **超时惩罚** | 超时走 on_task_done，目前与失败相同（Judge 给低分） |
+
+[English](../en/REWARD_MECHANISM.md)

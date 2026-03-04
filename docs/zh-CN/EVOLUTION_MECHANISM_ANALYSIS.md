@@ -151,3 +151,5 @@ should_evolve = periodic or failure_trigger
 | **配置示例** | `evotown_config.json.example` 提供完整进化配置模板 |
 
 **SkillLite 侧**：`meaningful` 定义为 `total_tools >= 2`，单工具任务不积累。若需进一步放宽，可修改 `crates/skilllite-evolution/src/lib.rs` 中 SQL 的 `total_tools >= 2` 为 `>= 1`（需评估质量影响）。
+
+[English](../en/EVOLUTION_MECHANISM_ANALYSIS.md)
