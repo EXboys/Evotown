@@ -57,6 +57,10 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-80}:80"
+    volumes:
+      # 开发时挂载本地 build 产物 + nginx 配置，免去重建镜像
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/evotown.conf:ro
     depends_on:
       backend:
         condition: service_healthy

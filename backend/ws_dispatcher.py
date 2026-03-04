@@ -56,6 +56,14 @@ class WsDispatcher:
         self._manager = manager
 
     async def broadcast(self, data: dict[str, Any]) -> None:
+        # 同步写入 replay（如果当前有录制 session）
+        try:
+            from infra.replay import get_recorder
+            rec = get_recorder()
+            if rec is not None:
+                rec.record(data)
+        except Exception as _replay_err:  # noqa: BLE001
+            logger.debug("replay record error: %s", _replay_err)
         await self._manager.broadcast(data)
 
     # ── 出站消息构建器 ─────────────────────────────────────────────────────────

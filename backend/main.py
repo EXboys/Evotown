@@ -23,7 +23,7 @@ from core.config import load_economy_config
 from domain.arena import AgentRecord
 from infra.experiment import get_or_create_experiment_id
 from infra.persistence import load_state
-from api.routers import agents, config, dispatcher, monitor, tasks, websocket
+from api.routers import agents, config, dispatcher, monitor, tasks, websocket, replay
 from log_watcher import start_watching
 
 logging.basicConfig(
@@ -36,6 +36,10 @@ logger = logging.getLogger("evotown.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     deps.experiment_id = get_or_create_experiment_id()
+
+    # 启动 Replay 录制 session（以实验 ID 命名，重启后开新 session）
+    from infra.replay import start_session as _start_replay
+    _start_replay(deps.experiment_id)
 
     state = load_state(experiment_id=deps.experiment_id)
     arena.restore_counter(state.get("agent_counter", 0))
@@ -107,6 +111,8 @@ async def lifespan(app: FastAPI):
         await _timeout_task
     except asyncio.CancelledError:
         pass
+    from infra.replay import stop_session as _stop_replay
+    _stop_replay()
     await task_dispatcher.stop()
     for aid in list(arena.agents.keys()):
         rec = arena.get_agent(aid)
@@ -135,6 +141,7 @@ app.include_router(config.router)
 app.include_router(dispatcher.router)
 app.include_router(monitor.router)
 app.include_router(websocket.router)
+app.include_router(replay.router)
 # 兼容前端可能使用的 /api 前缀（解决 /config/experiment、/monitor/task_history 404）
 app.include_router(config.router, prefix="/api")
 app.include_router(monitor.router, prefix="/api")

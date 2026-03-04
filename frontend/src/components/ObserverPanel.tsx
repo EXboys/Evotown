@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useLayoutEffect } from "react";
+import { useReplay } from "../hooks/useReplay";
 import { evotownEvents } from "../phaser/events";
 
 /** 与 TownScene 一致的 agent 颜色（按 agentId 哈希） */
@@ -17,12 +18,13 @@ import { MetricsDashboard } from "./MetricsDashboard";
 import { AgentDetail } from "./AgentDetail";
 import { ArenaControl } from "./ArenaControl";
 import { AgentGraveyard } from "./AgentGraveyard";
+import { Leaderboard } from "./Leaderboard";
 
-type TabId = "timeline" | "metrics" | "agents" | "arena" | "graveyard";
+type TabId = "metrics" | "agents" | "arena" | "graveyard" | "leaderboard";
 
 export function ObserverPanel() {
   const [taskInput, setTaskInput] = useState("");
-  const [tab, setTab] = useState<TabId>("arena");
+  const [tab, setTab] = useState<TabId>("leaderboard");
   const [agentDetailInitialTab, setAgentDetailInitialTab] = useState<
     "rules" | "skills" | "decisions" | "evolution" | "soul" | undefined
   >(undefined);
@@ -120,6 +122,12 @@ export function ObserverPanel() {
     }
   };
 
+  // ── Replay ──────────────────────────────────────────────────────────────────
+  const replay = useReplay();
+  useEffect(() => {
+    if (tab === "leaderboard") replay.fetchSessions();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [evolveFeedback, setEvolveFeedback] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const removeAgent = useEvotownStore((s) => s.removeAgent);
@@ -179,6 +187,8 @@ export function ObserverPanel() {
     }
   };
 
+
+
   return (
     <div className="w-[min(380px,40%)] min-w-[260px] max-w-[420px] flex flex-col shrink-0 bg-[#1e293b] backdrop-blur-sm border-l border-slate-600/50 shadow-evo-panel relative">
       {/* 紧凑头部：观测面板 + 实验 ID */}
@@ -206,35 +216,27 @@ export function ObserverPanel() {
         </div>
       </div>
 
-      {/* Tab 栏：支持横向滚动，小屏不溢出 */}
-      <div className="flex items-stretch border-b border-slate-600/50 shrink-0 overflow-x-auto [scrollbar-width:thin]">
-        <div className="flex items-center min-w-0 flex-1">
-          {[
-            { id: "arena" as TabId, label: "竞技场" },
-            { id: "agents" as TabId, label: "智能体" },
-            { id: "graveyard" as TabId, label: "墓园" },
-            { id: "timeline" as TabId, label: "时间线" },
-            { id: "metrics" as TabId, label: "EGL" },
-          ].map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`flex-1 min-w-[56px] py-2 sm:py-2.5 px-2 text-[11px] sm:text-xs font-medium transition-colors whitespace-nowrap ${
-                tab === t.id
-                  ? "text-evo-accent border-b-2 border-evo-accent"
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={createAgent}
-          className="mx-2 my-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 text-[10px] font-medium bg-emerald-600/80 hover:bg-emerald-500 rounded text-white shrink-0 self-center"
-        >
-          + 新建
-        </button>
+      {/* Tab 栏：6 个 Tab，排名 Tab 内含回放+动态 */}
+      <div className="flex border-b border-slate-600/50 shrink-0">
+        {[
+          { id: "leaderboard" as TabId, label: "排名" },
+          { id: "arena" as TabId, label: "竞技" },
+          { id: "agents" as TabId, label: "智能体" },
+          { id: "graveyard" as TabId, label: "墓园" },
+          { id: "metrics" as TabId, label: "EGL" },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 py-2 px-1 text-[10px] sm:text-[11px] font-medium transition-colors whitespace-nowrap ${
+              tab === t.id
+                ? "text-evo-accent border-b-2 border-evo-accent"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       <div
@@ -326,17 +328,84 @@ export function ObserverPanel() {
           </section>
         )}
 
+        {tab === "leaderboard" && (
+          <div className="space-y-4">
+            {/* 1. 排行榜 */}
+            <Leaderboard />
+
+            {/* 2. 回放控制 */}
+            <div className="border-t border-slate-700/50 pt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider">⏮ 回放</h3>
+                <button onClick={replay.fetchSessions} className="text-[10px] text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded border border-slate-600/40">刷新</button>
+              </div>
+
+              {replay.sessions.length === 0 ? (
+                <p className="text-xs text-slate-500 italic">暂无录制，运行中自动录制</p>
+              ) : (
+                <select
+                  value={replay.sessionId ?? ""}
+                  onChange={(e) => e.target.value && replay.load(e.target.value)}
+                  className="w-full py-1.5 px-2 rounded-lg bg-slate-800/60 border border-slate-600/40 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-evo-accent/50"
+                >
+                  <option value="">— 选择录制 —</option>
+                  {replay.sessions.map((s) => (
+                    <option key={s.session_id} value={s.session_id}>
+                      {s.session_id} ({(s.size_bytes / 1024).toFixed(1)} KB)
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {replay.replayState !== "idle" && (
+                <div className="space-y-2">
+                  <div>
+                    <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                      <span>{replay.currentIndex}/{replay.total}</span>
+                      <span className={replay.replayState === "playing" ? "text-emerald-400" : replay.replayState === "done" ? "text-amber-400" : "text-slate-400"}>
+                        {replay.replayState === "loading" ? "加载中…" : replay.replayState === "ready" ? "就绪" : replay.replayState === "playing" ? "▶ 播放中" : replay.replayState === "paused" ? "⏸ 已暂停" : "✓ 完成"}
+                      </span>
+                    </div>
+                    <div className="w-full h-1 bg-slate-700 rounded-full overflow-hidden">
+                      <div className="h-full bg-evo-accent rounded-full transition-all" style={{ width: `${replay.progress * 100}%` }} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {[1, 2, 4, 8].map((x) => (
+                      <button key={x} onClick={() => replay.setSpeed(x)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors ${replay.speed === x ? "border-evo-accent text-evo-accent" : "border-slate-600/40 text-slate-500 hover:text-slate-300"}`}>
+                        {x}x
+                      </button>
+                    ))}
+                    <span className="flex-1" />
+                    {(replay.replayState === "ready" || replay.replayState === "paused") && (
+                      <button onClick={replay.play} className="px-2.5 py-1 rounded bg-emerald-600/80 hover:bg-emerald-500 text-white text-[11px] font-medium">▶</button>
+                    )}
+                    {replay.replayState === "playing" && (
+                      <button onClick={replay.pause} className="px-2.5 py-1 rounded bg-amber-600/80 hover:bg-amber-500 text-white text-[11px] font-medium">⏸</button>
+                    )}
+                    <button onClick={replay.reset} className="px-2 py-1 rounded border border-slate-600/40 text-slate-400 hover:text-slate-200 text-[11px]">↺</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. 进化时间线 */}
+            <div className="border-t border-slate-700/50 pt-3">
+              <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">📈 时间线</h3>
+              <EvolutionTimeline
+                agents={agents}
+                onSelectAgent={(agentId, evoTab) => {
+                  setSelectedAgent(agentId);
+                  setAgentDetailInitialTab(evoTab === "evolution" ? "evolution" : undefined);
+                }}
+              />
+            </div>
+          </div>
+        )}
         {tab === "arena" && <ArenaControl />}
         {tab === "graveyard" && <AgentGraveyard />}
-        {tab === "timeline" && (
-          <EvolutionTimeline
-            agents={agents}
-            onSelectAgent={(agentId, evoTab) => {
-              setSelectedAgent(agentId);
-              setAgentDetailInitialTab(evoTab === "evolution" ? "evolution" : undefined);
-            }}
-          />
-        )}
+
         {tab === "metrics" && <MetricsDashboard agents={agents} />}
 
       </div>
