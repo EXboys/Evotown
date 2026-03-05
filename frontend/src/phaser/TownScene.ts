@@ -344,11 +344,9 @@ export default class TownScene extends Phaser.Scene {
     tasks.forEach((t) => this.taskNpcManager.spawnForTask(t.task_id));
   }
 
-  /** 生成带 agent_id 后缀的标签文本 */
-  private agentLabel(displayName: string, agentId: string): string {
-    // 如果 displayName 本身就是 agentId，不要重复
-    if (displayName === agentId) return agentId;
-    return `${displayName} (${agentId})`;
+  /** 生成标签文本：主游戏界面只显示 agent_name */
+  private agentLabel(displayName: string, _agentId: string): string {
+    return displayName;
   }
 
   private getOrCreateAgent(agentId: string, displayName?: string): AgentState {

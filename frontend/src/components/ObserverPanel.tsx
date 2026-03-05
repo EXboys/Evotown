@@ -125,6 +125,9 @@ export function ObserverPanel() {
   // ── Replay ──────────────────────────────────────────────────────────────────
   const replay = useReplay();
   useEffect(() => {
+    replay.fetchActiveSession();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
     if (tab === "leaderboard") replay.fetchSessions();
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -202,7 +205,7 @@ export function ObserverPanel() {
             </h2>
             <p className="text-[10px] sm:text-xs text-slate-500 mt-0.5">监控与操控智能体</p>
           </div>
-          <div className="flex flex-col items-end gap-0.5">
+          <div className="flex flex-col items-end gap-1">
             {experimentInfo.experiment_id && (
               <p className="text-[10px] text-slate-600 font-mono truncate sm:max-w-[180px]" title={experimentInfo.experiment_id}>
                 实验: {experimentInfo.experiment_id}
@@ -213,6 +216,35 @@ export function ObserverPanel() {
                 Token: {(tokenUsage.total_tokens / 1000).toFixed(1)}K
               </p>
             )}
+            {/* 录制控制 */}
+            <div className="flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${replay.activeSession?.active ? "bg-red-500 animate-pulse" : "bg-slate-600"}`} />
+              {replay.activeSession?.active ? (
+                <>
+                  <span
+                    className="text-[10px] text-red-400/80 font-mono truncate max-w-[120px]"
+                    title={replay.activeSession.session_id ?? ""}
+                  >
+                    {replay.activeSession.session_id}
+                  </span>
+                  <button
+                    onClick={replay.stopSession}
+                    disabled={replay.recordingBusy}
+                    className="text-[10px] text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors shrink-0"
+                  >
+                    ■ 停止
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => replay.startNewSession()}
+                  disabled={replay.recordingBusy}
+                  className="text-[10px] text-slate-500 hover:text-red-400 disabled:opacity-40 transition-colors"
+                >
+                  {replay.recordingBusy ? "…" : "● 新建录制"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -291,7 +323,9 @@ export function ObserverPanel() {
                           className="inline-block w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: getAgentColor(a.id) }}
                         />
-                        <span className="truncate min-w-0">{a.display_name || a.id}</span>
+                        <span className="truncate min-w-0">
+                          {a.display_name ? `${a.display_name}(${a.id})` : a.id}
+                        </span>
                         <span className="text-amber-400 shrink-0">({a.balance})</span>
                         <span className="shrink-0 text-[10px] text-slate-500" title="任务 成功/总数 · 进化 成功/总数">
                           📋{a.success_count ?? 0}/{a.task_count ?? 0} ✨{a.evolution_success_count ?? 0}/{a.evolution_count ?? 0}
@@ -338,7 +372,10 @@ export function ObserverPanel() {
             <div className="border-t border-slate-700/50 pt-3 space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider">⏮ 回放</h3>
-                <button onClick={replay.fetchSessions} className="text-[10px] text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded border border-slate-600/40">刷新</button>
+                <button
+                  onClick={() => { replay.fetchSessions(); replay.fetchActiveSession(); }}
+                  className="text-[10px] text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded border border-slate-600/40"
+                >刷新</button>
               </div>
 
               {replay.sessions.length === 0 ? (
@@ -391,7 +428,7 @@ export function ObserverPanel() {
               )}
             </div>
 
-            {/* 3. 进化时间线 */}
+            {/* 4. 进化时间线 */}
             <div className="border-t border-slate-700/50 pt-3">
               <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">📈 时间线</h3>
               <EvolutionTimeline

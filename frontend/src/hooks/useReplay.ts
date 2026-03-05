@@ -1,12 +1,15 @@
 /**
- * useReplay — 从录制 JSONL 回放 WS 事件
+ * useReplay — 从录制 JSONL 回放 WS 事件，并提供录制会话管理
  *
  * 使用方式：
- *   const { sessions, load, play, pause, reset, state, speed, setSpeed } = useReplay();
- *   load(sessionId)   // 拉取事件列表
- *   play()            // 开始/继续回放
- *   pause()           // 暂停
- *   reset()           // 重置到开头
+ *   const { sessions, load, play, pause, reset, state, speed, setSpeed,
+ *           activeSession, fetchActiveSession, startNewSession, stopSession } = useReplay();
+ *   load(sessionId)              // 拉取事件列表
+ *   play()                       // 开始/继续回放
+ *   pause()                      // 暂停
+ *   reset()                      // 重置到开头
+ *   startNewSession("my-tag")    // 新建录制（后端关闭旧 session，开新 session）
+ *   stopSession()                // 停止当前录制
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { evotownEvents } from "../phaser/events";
@@ -16,6 +19,11 @@ export interface ReplaySession {
   session_id: string;
   size_bytes: number;
   modified_at: string;
+}
+
+export interface ActiveSession {
+  active: boolean;
+  session_id: string | null;
 }
 
 export type ReplayState = "idle" | "loading" | "ready" | "playing" | "paused" | "done";
@@ -79,6 +87,8 @@ export function useReplay() {
   const [speed, setSpeed] = useState(1);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [recordingBusy, setRecordingBusy] = useState(false);
 
   const eventsRef = useRef<Record<string, unknown>[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -95,6 +105,42 @@ export function useReplay() {
       setSessions(Array.isArray(data) ? data : []);
     } catch { /* ignore */ }
   }, []);
+
+  const fetchActiveSession = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/replay/sessions/active`);
+      if (!r.ok) return;
+      const data = await r.json() as ActiveSession;
+      setActiveSession(data);
+    } catch { /* ignore */ }
+  }, []);
+
+  const startNewSession = useCallback(async (sid?: string) => {
+    setRecordingBusy(true);
+    try {
+      const url = sid
+        ? `${API_BASE}/replay/sessions/start?session_id=${encodeURIComponent(sid)}`
+        : `${API_BASE}/replay/sessions/start`;
+      const r = await fetch(url, { method: "POST" });
+      if (!r.ok) return;
+      const data = await r.json() as { ok: boolean; session_id: string };
+      setActiveSession({ active: true, session_id: data.session_id });
+      // 刷新列表，新文件立即出现
+      await fetchSessions();
+    } catch { /* ignore */ }
+    finally { setRecordingBusy(false); }
+  }, [fetchSessions]);
+
+  const stopSession = useCallback(async () => {
+    setRecordingBusy(true);
+    try {
+      const r = await fetch(`${API_BASE}/replay/sessions/stop`, { method: "POST" });
+      if (!r.ok) return;
+      setActiveSession({ active: false, session_id: null });
+      await fetchSessions();
+    } catch { /* ignore */ }
+    finally { setRecordingBusy(false); }
+  }, [fetchSessions]);
 
   const load = useCallback(async (sid: string) => {
     setReplayState("loading");
@@ -192,6 +238,13 @@ export function useReplay() {
   const total = eventsRef.current.length;
   const progress = total > 0 ? currentIndex / total : 0;
 
-  return { sessions, fetchSessions, load, play, pause, reset, replayState, speed, setSpeed, currentIndex, total, progress, sessionId };
+  return {
+    sessions, fetchSessions,
+    load, play, pause, reset,
+    replayState, speed, setSpeed,
+    currentIndex, total, progress, sessionId,
+    activeSession, fetchActiveSession,
+    startNewSession, stopSession, recordingBusy,
+  };
 }
 

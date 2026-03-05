@@ -110,7 +110,7 @@ export function Leaderboard() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="text-xs font-medium text-slate-200 truncate">
-                      {agent.display_name || agent.id}
+                      {agent.display_name ? `${agent.display_name}(${agent.id})` : agent.id}
                     </span>
                     {agent.in_task && (
                       <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" title="执行中" />
