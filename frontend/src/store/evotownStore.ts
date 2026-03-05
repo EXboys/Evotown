@@ -1,5 +1,22 @@
 /** Evotown 全局状态 — 进化事件、Agent 列表、裁判评分、分发器 */
 import { create } from "zustand";
+import { WARRIORS, type WarriorId } from "../phaser/warriorPortraits";
+
+/** 武将 ID 池 */
+const WARRIOR_IDS: WarriorId[] = ["kongming", "zhaoyun", "simayi", "zhouyu", "guanyu", "zhangfei", "liubei", "caocao", "sunquan", "zhangliao", "guojia", "huanggai", "lusu"];
+
+/** 根据 agentId 哈希分配一个三国武将显示名，避开 usedNames 中已占用的名字 */
+function autoWarriorName(agentId: string, usedNames: Set<string> = new Set()): string {
+  const hash = agentId.split("").reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0);
+  const start = Math.abs(hash) % WARRIOR_IDS.length;
+  // 从哈希位置开始，找第一个未被占用的武将
+  for (let i = 0; i < WARRIOR_IDS.length; i++) {
+    const name = WARRIORS[WARRIOR_IDS[(start + i) % WARRIOR_IDS.length]].name;
+    if (!usedNames.has(name)) return name;
+  }
+  // 全部占满时加序号区分
+  return WARRIORS[WARRIOR_IDS[start]].name + `·${agentId.slice(-2)}`;
+}
 
 export interface AgentInfo {
   id: string;
@@ -120,21 +137,41 @@ export const useEvotownStore = create<EvotownState>((set, get) => ({
   replayMode: false,
 
   setReplayMode: (mode) => set({ replayMode: mode }),
-  setAgents: (agents) => set({ agents }),
+  setAgents: (agents) => {
+    // 批量分配：始终用三国武将名覆盖后端英文名，逐个去重
+    const usedNames = new Set<string>();
+    const result = agents.map((a) => {
+      // 已经是三国武将名（包含中文）则保留，否则强制分配
+      const isChinese = a.display_name && /[\u4e00-\u9fff]/.test(a.display_name);
+      if (isChinese && !usedNames.has(a.display_name!)) {
+        usedNames.add(a.display_name!);
+        return a;
+      }
+      const name = autoWarriorName(a.id, usedNames);
+      usedNames.add(name);
+      return { ...a, display_name: name };
+    });
+    set({ agents: result });
+  },
   addAgent: (agent) =>
     set((s) => {
+      const usedNames = new Set(s.agents.map((a) => a.display_name).filter(Boolean) as string[]);
+      // 已经是中文且未重复则保留，否则强制分配三国武将名
+      const isChinese = agent.display_name && /[\u4e00-\u9fff]/.test(agent.display_name);
+      const withName = (isChinese && !usedNames.has(agent.display_name!))
+        ? agent
+        : { ...agent, display_name: autoWarriorName(agent.id, usedNames) };
       const exists = s.agents.some((a) => a.id === agent.id);
       if (exists) {
-        // 更新 display_name（及其它字段），不丢弃已有数据
         return {
           agents: s.agents.map((a) =>
             a.id === agent.id
-              ? { ...a, ...(agent.display_name ? { display_name: agent.display_name } : {}) }
+              ? { ...a, display_name: withName.display_name }
               : a
           ),
         };
       }
-      return { agents: [...s.agents, agent] };
+      return { agents: [...s.agents, withName] };
     }),
   updateAgentBalance: (agentId, balance) =>
     set((s) => ({

@@ -2,18 +2,14 @@
 import { useEffect, useState } from "react";
 import { useEvotownStore, type EvolutionEventItem } from "../store/evotownStore";
 
-const AGENT_COLORS: Record<string, string> = {
-  agent_1: "#38bdf8",
-  agent_2: "#a78bfa",
-  agent_3: "#34d399",
-  agent_4: "#fbbf24",
-  agent_5: "#f87171",
-};
-
-const FALLBACK_COLORS = ["#38bdf8", "#a78bfa", "#34d399", "#fbbf24", "#f87171", "#fb923c", "#a3e635"];
-
-function agentColor(id: string, index: number = 0) {
-  return AGENT_COLORS[id] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+/** 与 ObserverPanel / TownScene 一致的 agent 颜色（按 agentId 哈希） */
+const AGENT_COLORS = [
+  "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6",
+  "#8b5cf6", "#d946ef", "#ec4899", "#f43f5e", "#14b8a6", "#84cc16",
+];
+function agentColor(id: string, _index: number = 0) {
+  const hash = id.split("").reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0);
+  return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
 }
 
 function eventLabel(type: string): string {

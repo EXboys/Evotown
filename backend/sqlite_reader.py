@@ -495,8 +495,31 @@ def _evolved_prompt_files(chat_root: str) -> set[str]:
     return evolved
 
 
+def _get_earliest_snapshot_content(chat_root: str, filename: str) -> str | None:
+    """从最早的快照目录读取指定文件的原始内容（进化前版本）"""
+    versions_dir = _prompts_dir(chat_root) / "_versions"
+    if not versions_dir.exists():
+        return None
+    try:
+        txn_dirs = sorted(
+            [d for d in versions_dir.iterdir() if d.is_dir()],
+            key=lambda d: d.name,
+        )
+    except OSError:
+        return None
+    for txn_dir in txn_dirs:
+        file_path = txn_dir / filename
+        if file_path.exists():
+            try:
+                return file_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+    return None
+
+
 async def get_prompts(chat_root: str) -> list[dict[str, Any]]:
-    """读取 prompts 目录下的 planning.md, execution.md, system.md, examples.md，并标注是否进化过"""
+    """读取 prompts 目录下的 planning.md, execution.md, system.md, examples.md，
+    标注是否进化过，并为进化过的文件返回 original_content（进化前最早快照）供前端 diff。"""
     prompts_dir = _prompts_dir(chat_root)
     if not prompts_dir.exists():
         return []
@@ -515,10 +538,15 @@ async def get_prompts(chat_root: str) -> list[dict[str, Any]]:
                 content = path.read_text(encoding="utf-8")
             except OSError:
                 pass
+        is_evolved = filename in evolved_files
+        original_content: str | None = None
+        if is_evolved:
+            original_content = _get_earliest_snapshot_content(chat_root, filename)
         result.append({
             "name": name,
             "filename": filename,
             "content": content,
-            "evolved": filename in evolved_files,
+            "evolved": is_evolved,
+            "original_content": original_content,
         })
     return result

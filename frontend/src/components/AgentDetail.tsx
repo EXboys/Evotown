@@ -4,6 +4,7 @@ import { evotownEvents } from "../phaser/events";
 import { useEvotownStore } from "../store/evotownStore";
 import { ShareCard } from "./ShareCard";
 
+
 interface SoulData {
   content: string;
   soul_type: string;
@@ -24,6 +25,105 @@ interface PromptItem {
   filename: string;
   content: string;
   evolved: boolean;
+  original_content?: string | null;
+}
+
+type DiffLineKind = "added" | "removed" | "unchanged";
+interface DiffLine { kind: DiffLineKind; text: string; }
+
+/** 基于 LCS 的逐行 diff，返回带标注的行列表 */
+function computeDiff(original: string, current: string): DiffLine[] {
+  const a = original.split("\n");
+  const b = current.split("\n");
+  const m = a.length, n = b.length;
+  // LCS dp table
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  // backtrack
+  const result: DiffLine[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+      result.push({ kind: "unchanged", text: a[i - 1] }); i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.push({ kind: "added", text: b[j - 1] }); j--;
+    } else {
+      result.push({ kind: "removed", text: a[i - 1] }); i--;
+    }
+  }
+  return result.reverse();
+}
+
+function PromptDiffView({ original, current }: { original: string; current: string }) {
+  const CONTEXT = 3;
+  const lines = computeDiff(original, current);
+  const addedCount = lines.filter((l) => l.kind === "added").length;
+  const removedCount = lines.filter((l) => l.kind === "removed").length;
+
+  // Build visible index set: all non-unchanged lines + CONTEXT lines around them
+  const visibleSet = new Set<number>();
+  lines.forEach((l, idx) => {
+    if (l.kind !== "unchanged") {
+      for (let k = Math.max(0, idx - CONTEXT); k <= Math.min(lines.length - 1, idx + CONTEXT); k++) {
+        visibleSet.add(k);
+      }
+    }
+  });
+
+  // Render, collapsing hidden runs
+  const rendered: React.ReactNode[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (visibleSet.has(i)) {
+      const l = lines[i];
+      rendered.push(
+        <div
+          key={i}
+          className={
+            l.kind === "added"
+              ? "bg-violet-900/30 text-violet-200 border-l-2 border-violet-500 pl-2 -ml-2"
+              : l.kind === "removed"
+              ? "bg-red-900/20 text-red-400/70 line-through border-l-2 border-red-700/50 pl-2 -ml-2"
+              : "text-slate-600"
+          }
+        >
+          {l.kind === "added" && <span className="mr-1 text-violet-400 select-none">+</span>}
+          {l.kind === "removed" && <span className="mr-1 text-red-500/70 select-none">−</span>}
+          {l.kind === "unchanged" && <span className="mr-1 text-slate-700 select-none"> </span>}
+          <span className="whitespace-pre-wrap break-words">{l.text || "\u00a0"}</span>
+        </div>
+      );
+      i++;
+    } else {
+      // count skipped lines
+      let skipped = 0;
+      while (i < lines.length && !visibleSet.has(i)) { skipped++; i++; }
+      rendered.push(
+        <div key={`skip-${i}`} className="text-slate-700 text-[10px] py-0.5 select-none">
+          ···{skipped} 行未变···
+        </div>
+      );
+    }
+  }
+
+  if (visibleSet.size === 0) {
+    return (
+      <div className="p-3 text-[11px] text-slate-500 italic">内容无变化（快照与当前版本相同）</div>
+    );
+  }
+
+  return (
+    <div className="text-[11px] font-mono leading-relaxed">
+      <div className="flex items-center gap-3 px-3 py-1.5 bg-slate-900/50 border-b border-slate-700/40 text-[10px]">
+        {addedCount > 0 && <span className="text-violet-400">+{addedCount} 新增</span>}
+        {removedCount > 0 && <span className="text-red-400/70">−{removedCount} 移除</span>}
+        {addedCount === 0 && removedCount === 0 && <span className="text-slate-500">无变化</span>}
+      </div>
+      <div className="p-3 max-h-72 overflow-y-auto space-y-0">{rendered}</div>
+    </div>
+  );
 }
 
 interface Decision {
@@ -60,6 +160,92 @@ interface ExecutionLogItem {
   total_tools?: number;
   failed_tools?: number;
   elapsed_ms?: number;
+}
+
+function PromptTab({
+  prompts,
+  onRefresh,
+  loading,
+}: {
+  prompts: PromptItem[];
+  onRefresh: () => void;
+  loading: boolean;
+}) {
+  const [showDiff, setShowDiff] = useState<Record<string, boolean>>({});
+
+  const header = (
+    <div className="flex items-center justify-between gap-2 mb-1">
+      <p className="text-xs text-slate-500">
+        <span className="text-violet-400">+紫色</span> = 进化新增，
+        <span className="text-red-400/70 line-through">−红色</span> = 原有已移除
+      </p>
+      <button
+        onClick={onRefresh}
+        disabled={loading}
+        className="shrink-0 px-2 py-0.5 rounded text-[10px] bg-slate-700/60 text-slate-400 border border-slate-600/40 hover:bg-slate-600/60 hover:text-slate-200 transition-colors disabled:opacity-40"
+      >
+        {loading ? "刷新中…" : "↻ 刷新"}
+      </button>
+    </div>
+  );
+
+  if (prompts.length === 0) {
+    return (
+      <div className="space-y-2">
+        {header}
+        <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
+          暂无 Prompts
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {header}
+      {prompts.map((p) => {
+        const canDiff = p.evolved && !!p.original_content;
+        const isDiffMode = canDiff && (showDiff[p.name] ?? true);
+        return (
+          <div
+            key={p.name}
+            className={`rounded-xl border text-xs overflow-hidden ${
+              p.evolved ? "bg-violet-900/10 border-violet-700/40" : "bg-slate-800/40 border-slate-700/40"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700/50 bg-slate-900/30">
+              <span className="font-mono font-medium text-slate-200">{p.filename}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                {p.evolved && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-violet-900/50 text-violet-400 border border-violet-600/50"
+                    title="曾被进化修改"
+                  >
+                    ✨ 进化
+                  </span>
+                )}
+                {canDiff && (
+                  <button
+                    onClick={() => setShowDiff((prev) => ({ ...prev, [p.name]: !isDiffMode }))}
+                    className="px-1.5 py-0.5 rounded text-[10px] bg-slate-700/60 text-slate-400 border border-slate-600/40 hover:bg-slate-600/60 hover:text-slate-200 transition-colors"
+                  >
+                    {isDiffMode ? "原文" : "对比"}
+                  </button>
+                )}
+              </div>
+            </div>
+            {isDiffMode && p.original_content != null ? (
+              <PromptDiffView original={p.original_content} current={p.content} />
+            ) : (
+              <pre className="p-3 text-slate-400 whitespace-pre-wrap break-words font-mono text-[11px] max-h-48 overflow-y-auto">
+                {p.content || "(空)"}
+              </pre>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const EVO_TYPE_LABELS: Record<string, string> = {
@@ -105,19 +291,34 @@ export function AgentDetail({
   const removeAgent = useEvotownStore((s) => s.removeAgent);
   const agent = useEvotownStore((s) => s.agents.find((a) => a.id === agentId));
 
+  const [promptsLoading, setPromptsLoading] = useState(false);
+
+  const loadPrompts = async () => {
+    setPromptsLoading(true);
+    try {
+      const res = await fetch(`/agents/${agentId}/prompts`);
+      const safeJson = async (r: Response, fb: unknown = []) => {
+        try { return r.ok ? (await r.json()) ?? fb : fb; } catch { return fb; }
+      };
+      const raw = (await safeJson(res, [])) as PromptItem[];
+      setPrompts(Array.isArray(raw) ? raw : []);
+    } catch { /* ignore */ } finally {
+      setPromptsLoading(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (!cancelled) setLoading(true);
       try {
-        const [rRes, sRes, dRes, exeRes, soulRes, evoRes, promptsRes] = await Promise.all([
+        const [rRes, sRes, dRes, exeRes, soulRes, evoRes] = await Promise.all([
           fetch(`/agents/${agentId}/rules`),
           fetch(`/agents/${agentId}/skills`),
           fetch(`/agents/${agentId}/decisions?limit=50`),
           fetch(`/agents/${agentId}/execution_log?limit=30`),
           fetch(`/agents/${agentId}/soul`),
           fetch(`/agents/${agentId}/evolution_log?limit=100`),
-          fetch(`/agents/${agentId}/prompts`),
         ]);
         if (cancelled) return;
 
@@ -175,9 +376,6 @@ export function AgentDetail({
         } else {
           setSoul(null);
         }
-
-        const promptsRaw = (await safeJson(promptsRes, [])) as PromptItem[];
-        setPrompts(Array.isArray(promptsRaw) ? promptsRaw : []);
       } catch (err) {
         if (cancelled) return;
         console.warn(`[evotown] AgentDetail load failed for ${agentId}`, err);
@@ -188,6 +386,12 @@ export function AgentDetail({
     load();
     const interval = setInterval(load, 15_000);
     return () => { cancelled = true; clearInterval(interval); };
+  }, [agentId]);
+
+  // Prompts: load once on mount, no polling — only changes during evolution
+  useEffect(() => {
+    loadPrompts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId]);
 
   useEffect(() => {
@@ -236,36 +440,49 @@ export function AgentDetail({
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-slate-900/95 backdrop-blur-sm border-l border-slate-600/50 min-w-0 overflow-hidden">
-      <div className="flex items-center justify-between gap-2 p-3 border-b border-slate-600/50">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-slate-200 truncate">{agent?.display_name || agentId} 详情</h3>
-          {agent && (
-            <p className="text-[10px] text-slate-500 mt-0.5" title="任务 成功/总数 · 进化 成功/总数">
-              📋{agent.success_count ?? 0}/{agent.task_count ?? 0} ✨{agent.evolution_success_count ?? 0}/{agent.evolution_count ?? 0}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={() => setShowShare(true)}
-            className="px-2 py-1 text-[10px] font-medium rounded bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600/40"
-            title="生成分享卡片"
-          >
-            📤
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="px-2 py-1 text-[10px] font-medium rounded bg-rose-600/20 text-rose-400 border border-rose-600/30 hover:bg-rose-600/40 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {deleting ? "删除中..." : "删除"}
-          </button>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white text-lg leading-none"
-          >
-            ×
-          </button>
+      {/* Agent 信息头部 */}
+      <div className="border-b border-slate-600/50 bg-gradient-to-b from-slate-900 to-slate-950 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-slate-100 truncate leading-tight">
+              {agent?.display_name || agentId}
+            </h3>
+            {agent && (
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                <span className="text-[10px] text-slate-400">
+                  💰 <span className="text-amber-400 font-medium">{agent.balance}</span>
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  📋 {agent.success_count ?? 0}/{agent.task_count ?? 0}
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  ✨ {agent.evolution_success_count ?? 0}/{agent.evolution_count ?? 0}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => setShowShare(true)}
+              className="px-2 py-1 text-[10px] font-medium rounded bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600/40"
+              title="生成分享卡片"
+            >
+              📤
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="px-2 py-1 text-[10px] font-medium rounded bg-rose-600/20 text-rose-400 border border-rose-600/30 hover:bg-rose-600/40 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {deleting ? "删除中..." : "删除"}
+            </button>
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white text-lg leading-none px-1"
+            >
+              ×
+            </button>
+          </div>
         </div>
       </div>
       <div className="flex border-b border-slate-600/50 overflow-x-auto">
@@ -391,40 +608,7 @@ export function AgentDetail({
             )}
           </ul>
         ) : tab === "prompts" ? (
-          <div className="space-y-3">
-            <p className="text-xs text-slate-500">planning / execution / system / examples（进化过的会标记 ✨）</p>
-            {prompts.length === 0 ? (
-              <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
-                暂无 Prompts
-              </p>
-            ) : (
-              prompts.map((p) => (
-                <div
-                  key={p.name}
-                  className={`rounded-xl border text-xs overflow-hidden ${
-                    p.evolved
-                      ? "bg-violet-900/15 border-violet-700/40"
-                      : "bg-slate-800/40 border-slate-700/40"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700/50 bg-slate-900/30">
-                    <span className="font-mono font-medium text-slate-200">{p.filename}</span>
-                    {p.evolved && (
-                      <span
-                        className="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-violet-900/50 text-violet-400 border border-violet-600/50"
-                        title="曾被进化修改"
-                      >
-                        ✨ 进化
-                      </span>
-                    )}
-                  </div>
-                  <pre className="p-3 text-slate-400 whitespace-pre-wrap break-words font-mono text-[11px] max-h-48 overflow-y-auto">
-                    {p.content || "(空)"}
-                  </pre>
-                </div>
-              ))
-            )}
-          </div>
+          <PromptTab prompts={prompts} onRefresh={loadPrompts} loading={promptsLoading} />
         ) : tab === "skills" ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between mb-1">

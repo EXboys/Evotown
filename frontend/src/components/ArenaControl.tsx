@@ -149,7 +149,14 @@ export function ArenaControl() {
     }
   };
 
-  const recentRecords = taskRecords.slice(-30).reverse();
+  const recentRecords = (() => {
+    const seen = new Set<string>();
+    return taskRecords.slice(-30).reverse().filter((r) => {
+      if (seen.has(r.task)) return false;
+      seen.add(r.task);
+      return true;
+    });
+  })();
 
   return (
     <div className="space-y-4 min-w-0">
@@ -302,8 +309,15 @@ function TaskHistorySection() {
       {history.length === 0 ? (
         <p className="text-xs text-slate-500 italic">暂无持久化历史</p>
       ) : (
-        <div className="max-h-64 overflow-y-auto space-y-1">
-          {[...history].reverse().slice(0, 80).map((h, i) => {
+        <div className="max-h-[130px] overflow-y-auto space-y-1">
+          {(() => {
+            const seen = new Set<string>();
+            return [...history].reverse().filter((h) => {
+              if (seen.has(h.task)) return false;
+              seen.add(h.task);
+              return true;
+            }).slice(0, 80);
+          })().map((h, i) => {
             const isDropped = h.outcome === "dropped" || (!h.agent_id && !h.claimed_by && h.refusal_count != null && h.outcome !== "refused");
             const isRefused = h.outcome === "refused";
             const claimant = h.claimed_by ?? h.agent_id;

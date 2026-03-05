@@ -1,16 +1,8 @@
 /** 实时排行榜 — 按余额从高到低排序，支持排名翻转箭头 */
 import { useRef } from "react";
 import { useEvotownStore } from "../store/evotownStore";
+import { WarriorPortraitCanvas } from "./WarriorPortraitCanvas";
 
-/** 与 TownScene 保持一致的 Agent 颜色（按 agentId 哈希） */
-const AGENT_COLORS = [
-  "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6",
-  "#8b5cf6", "#d946ef", "#ec4899", "#f43f5e", "#14b8a6", "#84cc16",
-];
-function getAgentColor(agentId: string): string {
-  const hash = agentId.split("").reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0);
-  return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
-}
 
 export function Leaderboard() {
   const agents = useEvotownStore((s) => s.agents);
@@ -59,7 +51,6 @@ export function Leaderboard() {
           const rank = idx + 1;
           const delta = rankDeltas[agent.id] ?? 0;
           const isSelected = selectedAgentId === agent.id;
-          const color = getAgentColor(agent.id);
           const balancePct = Math.min((agent.balance / maxBalance) * 100, 100);
           const successRate =
             (agent.task_count ?? 0) > 0
@@ -100,11 +91,14 @@ export function Leaderboard() {
                   {rank}
                 </span>
 
-                {/* 颜色点 */}
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: color }}
-                />
+                {/* 武将像素头像（32×48 → scale=1 → 32×48px，裁剪显示上半身） */}
+                <div className="shrink-0 overflow-hidden rounded-sm" style={{ width: 20, height: 28 }}>
+                  <WarriorPortraitCanvas
+                    agentDisplayName={agent.display_name || agent.id}
+                    scale={1}
+                    showLabel={false}
+                  />
+                </div>
 
                 {/* 名字 + 状态 */}
                 <div className="flex-1 min-w-0">
@@ -148,7 +142,7 @@ export function Leaderboard() {
               </div>
 
               {/* 统计数据行 */}
-              <div className="mt-1.5 pl-9 flex items-center gap-3 text-[10px] text-slate-500">
+              <div className="mt-1.5 pl-11 flex items-center gap-3 text-[10px] text-slate-500">
                 <span title="任务 成功/总数">📋 {agent.success_count ?? 0}/{agent.task_count ?? 0}</span>
                 {successRate !== null && (
                   <span className={successRate >= 60 ? "text-emerald-500" : "text-amber-500"}>

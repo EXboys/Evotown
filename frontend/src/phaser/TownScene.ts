@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { useEvotownStore } from "../store/evotownStore";
 import { evotownEvents } from "./events";
 import { createCharacterContainer, setCharFacing, type CharFacing } from "./characterAssets";
+import { getWarriorForAgent } from "./warriorPortraits";
 import { TaskNpcManager, getRandomWanderPoint } from "./taskNpc";
 import { NES } from "./nesColors";
 import {
@@ -29,6 +30,7 @@ interface AgentState {
   label: Phaser.GameObjects.Text;
   displayName: string;
   color: number;
+  warriorId: string;
   phaseOffset: number;
   taskPhase: TaskPhase;
   wanderTimer: number;
@@ -360,12 +362,15 @@ export default class TownScene extends Phaser.Scene {
       const spawn = getRandomWanderPoint();
       const name = displayName || agentId;
       const labelText = this.agentLabel(name, agentId);
+      // 根据名字确定武将 ID，注入专属精灵
+      const warriorId = getWarriorForAgent(name);
       const { container, label, body, base, helmet } = createCharacterContainer(
         this,
         spawn.x - cx,
         spawn.y - cy,
         color,
         labelText,
+        warriorId,
       );
       this.worldInner.add(container);
       const wander = getRandomWanderPoint();
@@ -378,6 +383,7 @@ export default class TownScene extends Phaser.Scene {
         label,
         displayName: name,
         color,
+        warriorId,
         phaseOffset: Math.random() * Math.PI * 2,
         taskPhase: "idle",
         wanderTimer: 0,
@@ -578,11 +584,11 @@ export default class TownScene extends Phaser.Scene {
       if (isMoving) {
         agent.facing = this.getFacing(dx, dy);
         const walkFrame = Math.floor((time + agent.phaseOffset) * 0.004) % 2;
-        setCharFacing(agent.base, agent.helmet, agent.facing, walkFrame);
+        setCharFacing(agent.base, agent.helmet, agent.facing, walkFrame, agent.warriorId);
         agent.container.x += Phaser.Math.Clamp(dx, -speed, speed);
         agent.container.y += Phaser.Math.Clamp(dy, -speed, speed);
       } else {
-        setCharFacing(agent.base, agent.helmet, agent.facing, 0);
+        setCharFacing(agent.base, agent.helmet, agent.facing, 0, agent.warriorId);
 
         // deliver 到达 NPC：更新余额、销毁 NPC、切换 idle 闲逛
         if (agent.taskPhase === "deliver") {
