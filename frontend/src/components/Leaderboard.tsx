@@ -42,7 +42,7 @@ export function Leaderboard() {
   return (
     <div className="space-y-2">
       <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider flex items-center gap-2">
-        <span className="text-amber-400">🏆</span> 排行榜
+        <span className="text-amber-400">⚔️</span> 军功榜
         <span className="text-slate-600 font-normal">({ranked.length})</span>
       </h3>
 
@@ -124,11 +124,11 @@ export function Leaderboard() {
                   </div>
                 </div>
 
-                {/* 余额数字 */}
+                {/* 军功数字 */}
                 <span className={`text-xs font-mono font-semibold shrink-0 ${
                   agent.balance <= 20 ? "text-red-400" : agent.balance <= 60 ? "text-amber-400" : "text-emerald-400"
                 }`}>
-                  ${agent.balance}
+                  {agent.balance} 功
                 </span>
 
                 {/* 排名变化箭头 */}

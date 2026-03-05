@@ -33,25 +33,25 @@ export function EventTicker() {
 
   useEffect(() => {
     const onEliminated = (d: { agent_id: string; reason?: string }) => {
-      push("💀", `${getAgentName(d.agent_id)} 破产出局！`, "#f87171");
+      push("💀", `${getAgentName(d.agent_id)} 兵败身死，入英魂祠！`, "#f87171");
     };
     const onEvolution = (d: { agent_id: string; event_type?: string; type?: string }) => {
       const et = d.event_type || d.type || "";
       const msg =
-        et === "rule_added" ? "学到了新规则" :
-        et === "skill_generated" ? "生成了新技能" : "进化触发";
+        et === "rule_added" ? "习得新兵法" :
+        et === "skill_generated" ? "创制新技能" : "进化触发";
       push("⚡", `${getAgentName(d.agent_id)} ${msg}！`, "#fbbf24");
     };
     const onTaskComplete = (d: { agent_id: string; success: boolean; balance: number }) => {
       if (d.success) {
-        push("✅", `${getAgentName(d.agent_id)} 完成任务，余额 $${d.balance}`, "#86efac");
+        push("✅", `${getAgentName(d.agent_id)} 军令完成，军功 ${d.balance}`, "#86efac");
       } else {
-        push("❌", `${getAgentName(d.agent_id)} 任务失败，余额 $${d.balance}`, "#fca5a5");
+        push("❌", `${getAgentName(d.agent_id)} 军令未竟，军功 ${d.balance}`, "#fca5a5");
       }
     };
     const onCreated = (d: { agent_id: string; display_name?: string }) => {
       const name = d.display_name || d.agent_id;
-      push("🌟", `${name} 加入竞技场！`, "#a5b4fc");
+      push("🌟", `${name} 奉命入阵！`, "#a5b4fc");
     };
 
     evotownEvents.on("agent_eliminated", onEliminated);
@@ -79,7 +79,7 @@ export function EventTicker() {
     <div className="w-full bg-slate-950/90 border-t border-slate-700/60 px-2 py-1 flex items-center gap-0 overflow-hidden select-none">
       {/* 标签 */}
       <span className="shrink-0 text-amber-400 text-[10px] font-bold mr-2 tracking-widest">
-        📡 LIVE
+        📜 战报
       </span>
       {/* 滚动区域 */}
       <div

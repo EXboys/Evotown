@@ -143,7 +143,7 @@ export default class TownScene extends Phaser.Scene {
     const h1 = (d: { agent_id: string; from: string; to: string; reason: string }) => this.onSpriteMove(d);
     const h2 = (d: { agent_id: string; success: boolean; balance: number }) => this.onTaskComplete(d);
     const h3 = (d: { agent_id: string; reason: string }) => this.onAgentEliminated(d);
-    const h4 = (d: { agent_id: string; balance: number }) => this.onAgentCreated(d);
+    const h4 = (d: { agent_id: string; balance: number; display_name?: string }) => this.onAgentCreated(d);
     const h5 = (d: { agent_id: string; type?: string; [k: string]: unknown }) => this.onEvolutionEvent(d);
     const h6 = (d: { task_id: string; task: string; difficulty: string }) => this.onTaskAvailable(d);
     const h7 = (d: { task_id: string; agent_id: string; task: string }) => this.onTaskTaken(d);

@@ -9,12 +9,12 @@ from infra.persistence import load_state as load_persisted, save_state as save_p
 # 待办任务元数据：task, difficulty, task_id
 PendingTaskMeta = dict[str, Any]
 
-# Agent 展示名字池（24 个有个性的名字）
+# Agent 展示名字池（三国武将名，与前端 warriorPortraits.ts 匹配）
 _AGENT_NAME_POOL: list[str] = [
-    "Nova", "Rex", "Aria", "Zeno", "Luna", "Kai",
-    "Mira", "Orion", "Sage", "Vex", "Echo", "Dusk",
-    "Flux", "Lyra", "Bolt", "Nyx", "Zara", "Axel",
-    "Cleo", "Dex", "Ember", "Finn", "Gaia", "Hex",
+    "诸葛孔明", "赵子龙", "司马仲达", "周公瑾",
+    "关云长",   "张翼德", "刘玄德",   "曹孟德",
+    "孙仲谋",   "张文远", "郭奉孝",   "黄公覆",
+    "鲁子敬",
 ]
 
 

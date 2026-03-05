@@ -450,7 +450,7 @@ export function AgentDetail({
             {agent && (
               <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
                 <span className="text-[10px] text-slate-400">
-                  💰 <span className="text-amber-400 font-medium">{agent.balance}</span>
+                  ⚔️ <span className="text-amber-400 font-medium">{agent.balance} 军功</span>
                 </span>
                 <span className="text-[10px] text-slate-500">
                   📋 {agent.success_count ?? 0}/{agent.task_count ?? 0}
@@ -505,10 +505,10 @@ export function AgentDetail({
           <p className="text-sm text-slate-500">加载中...</p>
         ) : tab === "executions" ? (
           <div className="space-y-2">
-            <p className="text-xs text-slate-500">任务态度与执行（最近 30 条：拒绝 / 接受并执行）</p>
+            <p className="text-xs text-slate-500">军令态度与执行（最近 30 条：拒绝 / 接令并执行）</p>
             {executionLog.length === 0 ? (
               <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
-                暂无执行记录
+                暂无军令记录
               </p>
             ) : (
               <ul className="space-y-1.5 font-mono text-xs">

@@ -58,25 +58,27 @@ export function useWebSocket() {
               balance: number;
               in_task: boolean;
             }[];
-            agentList.forEach((a) => {
-              evotownEvents.emit("agent_created", {
-                agent_id: a.agent_id,
-                balance: a.balance,
-                display_name: a.display_name,
-              });
-              evotownEvents.emit("sprite_move", {
-                agent_id: a.agent_id,
-                from: "",
-                to: a.in_task ? "任务中心" : "广场",
-                reason: "snapshot",
-              });
-            });
+            // 先更新 store（setAgents 内部会将英文名转为三国中文名）
             store.setAgents(agentList.map((a) => ({
               id: a.agent_id,
               display_name: a.display_name,
               balance: a.balance,
               in_task: a.in_task,
             })));
+            // 取 store 中已转换的中文名向 Phaser 同步，而非原始英文 display_name
+            useEvotownStore.getState().agents.forEach((a) => {
+              evotownEvents.emit("agent_created", {
+                agent_id: a.id,
+                balance: a.balance,
+                display_name: a.display_name,
+              });
+              evotownEvents.emit("sprite_move", {
+                agent_id: a.id,
+                from: "",
+                to: a.in_task ? "任务中心" : "广场",
+                reason: "snapshot",
+              });
+            });
           } else if (type === "sprite_move") {
             evotownEvents.emit("sprite_move", {
               agent_id: String(msg.agent_id ?? ""),
@@ -163,7 +165,9 @@ export function useWebSocket() {
               store.setAgents(store.agents.map((a) =>
                 a.id === agentId ? { ...a, balance } : a
               ));
-              evotownEvents.emit("agent_created", { agent_id: agentId, balance });
+              // 从 store 取中文名一起传给 Phaser，避免 label 被重置为英文
+              const displayName = useEvotownStore.getState().agents.find((a) => a.id === agentId)?.display_name;
+              evotownEvents.emit("agent_created", { agent_id: agentId, balance, display_name: displayName });
             }
             store.pushEvolutionEvent({
               agent_id: agentId,
