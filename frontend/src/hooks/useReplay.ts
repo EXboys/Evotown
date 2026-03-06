@@ -115,12 +115,14 @@ export function useReplay() {
     } catch { /* ignore */ }
   }, []);
 
-  const startNewSession = useCallback(async (sid?: string) => {
+  const startNewSession = useCallback(async (sid?: string, newFile: boolean = false) => {
     setRecordingBusy(true);
     try {
-      const url = sid
-        ? `${API_BASE}/replay/sessions/start?session_id=${encodeURIComponent(sid)}`
-        : `${API_BASE}/replay/sessions/start`;
+      const params = new URLSearchParams();
+      if (sid) params.set("session_id", sid);
+      if (newFile) params.set("new_file", "true");
+      const qs = params.toString();
+      const url = qs ? `${API_BASE}/replay/sessions/start?${qs}` : `${API_BASE}/replay/sessions/start`;
       const r = await fetch(url, { method: "POST" });
       if (!r.ok) return;
       const data = await r.json() as { ok: boolean; session_id: string };

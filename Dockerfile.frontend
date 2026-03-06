@@ -1,10 +1,13 @@
+# syntax=docker/dockerfile:1
 # ── Stage 1: Build ──────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY frontend/package*.json ./
-RUN npm ci
+# --mount=type=cache 持久化 npm 离线缓存，--no-cache 也不会清除，跨次构建复用。
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --cache /root/.npm
 
 COPY frontend/ .
 RUN npm run build

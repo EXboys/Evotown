@@ -274,7 +274,7 @@ export function ObserverPanel() {
                 </>
               ) : (
                 <button
-                  onClick={() => replay.startNewSession(selectedExpId || experimentInfo.experiment_id || undefined)}
+                  onClick={() => replay.startNewSession(selectedExpId || experimentInfo.experiment_id || undefined, true)}
                   disabled={replay.recordingBusy}
                   className="text-[10px] text-slate-500 hover:text-red-400 disabled:opacity-40 transition-colors"
                   title={`录制到: ${selectedExpId || experimentInfo.experiment_id || "新建"}`}

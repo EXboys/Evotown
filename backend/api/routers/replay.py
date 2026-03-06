@@ -36,9 +36,11 @@ async def get_session_events(session_id: str):
 
 
 @router.post("/sessions/start")
-async def api_start_session(session_id: str | None = None):
-    """手动开始新录制 session（可选指定 session_id）"""
-    recorder = start_session(session_id)
+async def api_start_session(session_id: str | None = None, new_file: bool = False):
+    """手动开始新录制 session（可选指定 session_id）。
+    new_file=true 时覆盖已有文件，全新录制；false 时追加续写。
+    """
+    recorder = start_session(session_id, new_file=new_file)
     # 写入初始状态快照，回放时 Phaser 场景可立即渲染所有现存 agent
     snapshot_agents = [
         {

@@ -26,12 +26,13 @@ class ReplayRecorder:
         recorder.close()
     """
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(self, session_id: str, new_file: bool = False) -> None:
         self.session_id = session_id
         self._start_time = time.time()
         path = _ensure_dir() / f"{session_id}.jsonl"
-        self._file = open(path, "a", encoding="utf-8")  # noqa: WPS515
-        logger.info("[replay] session=%s path=%s", session_id, path)
+        mode = "w" if new_file else "a"
+        self._file = open(path, mode, encoding="utf-8")  # noqa: WPS515
+        logger.info("[replay] session=%s path=%s mode=%s", session_id, path, mode)
 
     def record(self, event: dict[str, Any]) -> None:
         """追加一条事件（加 replay_ts 字段，单位秒）。"""
@@ -58,13 +59,17 @@ def get_recorder() -> ReplayRecorder | None:
     return _recorder
 
 
-def start_session(session_id: str | None = None) -> ReplayRecorder:
-    """启动新录制 session，关闭上一个（如果有）。"""
+def start_session(session_id: str | None = None, new_file: bool = False) -> ReplayRecorder:
+    """启动新录制 session，关闭上一个（如果有）。
+
+    new_file=True 时以覆盖模式（"w"）创建全新录制文件；
+    new_file=False（默认）时以追加模式（"a"）续写，用于重启后自动恢复。
+    """
     global _recorder
     if _recorder is not None:
         _recorder.close()
     sid = session_id or datetime.now().strftime("%Y%m%dT%H%M%S")
-    _recorder = ReplayRecorder(sid)
+    _recorder = ReplayRecorder(sid, new_file=new_file)
     return _recorder
 
 
