@@ -542,6 +542,11 @@ async def get_prompts(chat_root: str) -> list[dict[str, Any]]:
         original_content: str | None = None
         if is_evolved:
             original_content = _get_earliest_snapshot_content(chat_root, filename)
+            # 历史 changelog.files 记录的是「备份清单」而非「修改清单」。
+            # 若快照内容与当前完全相同，该文件只是陪同备份，实际未被改动，不打标签。
+            if original_content is not None and original_content == content:
+                is_evolved = False
+                original_content = None
         result.append({
             "name": name,
             "filename": filename,

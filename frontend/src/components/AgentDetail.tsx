@@ -327,7 +327,12 @@ export function AgentDetail({
           catch { return fallback; }
         };
 
-        setRules((await safeJson(rRes, [])) as Rule[]);
+        const rawRules = (await safeJson(rRes, [])) as Rule[];
+        setRules([...rawRules].sort((a, b) => {
+          const aEvolved = a.origin === "evolved" ? 0 : 1;
+          const bEvolved = b.origin === "evolved" ? 0 : 1;
+          return aEvolved - bEvolved;
+        }));
 
         const skillsRaw = (await safeJson(sRes, [])) as unknown[];
         setSkills(
@@ -384,8 +389,7 @@ export function AgentDetail({
       }
     };
     load();
-    const interval = setInterval(load, 15_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => { cancelled = true; };
   }, [agentId]);
 
   // Prompts: load once on mount, no polling — only changes during evolution
@@ -566,17 +570,15 @@ export function AgentDetail({
               rules.map((r, i) => (
                 <li
                   key={r.id ?? i}
-                  className={`p-2 rounded border text-xs text-slate-300 ${
+                  className={`px-3 py-2.5 rounded border text-xs ${
                     r.origin === "evolved"
                       ? "bg-violet-900/20 border-violet-700/40"
                       : "bg-slate-800/50 border-slate-700/50"
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-mono whitespace-pre-wrap break-words flex-1 min-w-0">
-                      {r.instruction ?? r.content ?? JSON.stringify(r)}
-                    </p>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                  {/* 标签行 */}
+                  {(r.origin === "evolved" || r.tool_hint != null || r.effectiveness != null) && (
+                    <div className="flex items-center gap-1.5 mb-1.5">
                       {r.origin === "evolved" && (
                         <span
                           className="px-1.5 py-0.5 rounded text-[10px] bg-violet-900/50 text-violet-400 border border-violet-600/50"
@@ -598,11 +600,17 @@ export function AgentDetail({
                           {r.has_skill ? " ✓" : " ✗"}
                         </span>
                       )}
+                      {r.effectiveness != null && (
+                        <span className="text-[10px] text-slate-500 ml-auto">
+                          效能 {r.effectiveness}
+                        </span>
+                      )}
                     </div>
-                  </div>
-                  {r.effectiveness != null && (
-                    <p className="text-slate-500 mt-1">effectiveness: {r.effectiveness}</p>
                   )}
+                  {/* 正文 */}
+                  <p className="text-slate-300 leading-relaxed whitespace-pre-wrap break-words">
+                    {r.instruction ?? r.content ?? JSON.stringify(r)}
+                  </p>
                 </li>
               ))
             )}
