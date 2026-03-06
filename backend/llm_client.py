@@ -66,7 +66,7 @@ def _get_client() -> AsyncOpenAI:
         _client = AsyncOpenAI(
             base_url=_BASE_URL or None,
             api_key=_API_KEY,
-            timeout=30.0,
+            timeout=120.0,  # 文言文战报等长文本生成需要更长时间
         )
     return _client
 
@@ -124,8 +124,10 @@ async def chat_completion(
     temperature: float = 0.3,
     max_tokens: int = 1024,
     response_format: dict | None = None,
+    raw_only: bool = False,
 ) -> dict[str, Any]:
-    """调用 OpenAI 兼容 API，返回 parsed JSON 或 raw text"""
+    """调用 OpenAI 兼容 API，返回 parsed JSON 或 raw text。
+    raw_only=True 时跳过 JSON 解析，直接以 {"raw": content} 返回（用于文言文战报等纯文本生成）。"""
     model = model or _DEFAULT_MODEL
     client = _get_client()
 
@@ -150,6 +152,9 @@ async def chat_completion(
 
     if not content or not isinstance(content, str):
         return {"raw": content or ""}
+
+    if raw_only:
+        return {"raw": content}
 
     parsed = _parse_json_from_content(content)
     return parsed if parsed is not None else {"raw": content}

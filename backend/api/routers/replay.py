@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from infra.replay import list_sessions, load_session_events, start_session, stop_session, get_recorder
+from core import deps
 
 router = APIRouter(prefix="/replay", tags=["replay"])
 
@@ -38,6 +39,17 @@ async def get_session_events(session_id: str):
 async def api_start_session(session_id: str | None = None):
     """手动开始新录制 session（可选指定 session_id）"""
     recorder = start_session(session_id)
+    # 写入初始状态快照，回放时 Phaser 场景可立即渲染所有现存 agent
+    snapshot_agents = [
+        {
+            "agent_id": a.agent_id,
+            "display_name": a.display_name or a.agent_id,
+            "balance": a.balance,
+            "in_task": a.in_task,
+        }
+        for a in deps.arena.agents.values()
+    ]
+    recorder.record({"type": "state_snapshot", "agents": snapshot_agents})
     return {"ok": True, "session_id": recorder.session_id}
 
 

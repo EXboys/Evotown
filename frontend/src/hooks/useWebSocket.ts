@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { evotownEvents } from "../phaser/events";
 import { useEvotownStore } from "../store/evotownStore";
+import { useChronicleStore } from "../store/chronicleStore";
 
 const WS_URL = import.meta.env.DEV ? "ws://localhost:5174/ws" : `ws://${location.host}/ws`;
 const LOG = import.meta.env.DEV;
@@ -154,6 +155,11 @@ export function useWebSocket() {
               store.addAgent({ id: agentId, display_name: displayName, balance });
             }
             evotownEvents.emit("agent_created", { agent_id: agentId, balance, display_name: displayName });
+          } else if (type === "chronicle_published") {
+            useChronicleStore.getState().setLatestPublished({
+              date: String(msg.date ?? ""),
+              preview: String(msg.preview ?? ""),
+            });
           } else if (type === "evolution_event") {
             const agentId = String(msg.agent_id ?? "");
             const balance = msg.balance as number | undefined;

@@ -24,6 +24,8 @@ from domain.arena import AgentRecord
 from infra.experiment import get_or_create_experiment_id
 from infra.persistence import load_state
 from api.routers import agents, config, dispatcher, monitor, tasks, websocket, replay
+from api.routers import teams
+from api.routers import chronicle as chronicle_router
 from log_watcher import start_watching
 
 logging.basicConfig(
@@ -44,6 +46,7 @@ async def lifespan(app: FastAPI):
     state = load_state(experiment_id=deps.experiment_id)
     arena.restore_counter(state.get("agent_counter", 0))
     arena.restore_task_counter(state.get("task_counter", 0))
+    arena.restore_global_task_counter(state.get("global_task_counter", 0))
     cfg = load_economy_config()
     loop = asyncio.get_event_loop()
 
@@ -55,8 +58,10 @@ async def lifespan(app: FastAPI):
             soul_type = a.get("soul_type", "balanced")
             agent_home, chat_root = await process_mgr.spawn(agent_id, None, soul_type=soul_type)
             observer = start_watching(chat_root, agent_id, broadcast_evolution_event, loop)
-            # 优先使用持久化的展示名，否则重新分配
-            display_name = a.get("display_name", "") or arena.assign_display_name()
+            # 优先使用持久化的展示名；若为空或与 agent_id 相同（英文备用名），重新分配三国武将名
+            display_name_raw = a.get("display_name", "")
+            display_name = (display_name_raw if (display_name_raw and display_name_raw != agent_id)
+                            else arena.assign_display_name())
             record = AgentRecord(
                 agent_id=agent_id,
                 agent_home=agent_home,
@@ -67,6 +72,8 @@ async def lifespan(app: FastAPI):
                 soul_type=a.get("soul_type", "balanced"),
                 observer=observer,
                 display_name=display_name,
+                solo_preference=a.get("solo_preference", False),
+                evolution_focus=a.get("evolution_focus", ""),
             )
             arena.add_agent(record)
             logger.info("[%s] restored from disk (display_name=%s)", agent_id, display_name)
@@ -74,8 +81,33 @@ async def lifespan(app: FastAPI):
             logger.warning("[%s] restore failed: %s", agent_id, e)
 
     if arena.agents:
-        logger.info("Restored %d agents, counter=%d", len(arena.agents), arena.agent_counter)
-        # 启动后立即持久化到 volume，确保 arena_state.json 保存在 /app/data/（挂载卷）
+        logger.info(
+            "Restored %d agents, counter=%d, global_task_counter=%d",
+            len(arena.agents), arena.agent_counter, arena.global_task_counter,
+        )
+
+        # ── 恢复队伍结构（从持久化的 teams 字段）────────────────────────────────
+        saved_teams = state.get("teams", [])
+        if saved_teams:
+            arena.restore_teams(saved_teams)
+            logger.info("Restored %d teams from disk", len(arena.list_teams()))
+        else:
+            logger.info("No saved teams found in state")
+
+        # ── 自动结阵：若无队伍且 agent 数 >= 2，自动分成 2 队 ──────────────────
+        if not arena.list_teams() and len(arena.agents) >= 2:
+            try:
+                teams = arena.assign_teams(2)
+                logger.info(
+                    "Auto-assigned %d agents into %d teams: %s",
+                    len(arena.agents),
+                    len(teams),
+                    [t.name for t in teams],
+                )
+            except Exception as e:
+                logger.warning("Auto team assignment failed: %s", e)
+
+        # 启动后立即持久化（含队伍结构 + global_task_counter）
         arena.persist(experiment_id=deps.experiment_id)
         logger.info("Arena state persisted to data volume")
 
@@ -118,15 +150,46 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
+    async def _chronicle_loop() -> None:
+        """每日 00:05 CST 自动生成文言文战报"""
+        from datetime import datetime, timezone, timedelta
+        from services.chronicle import generate_chronicle
+        from core.deps import ws as _ws
+        _cst = timezone(timedelta(hours=8))
+        try:
+            while True:
+                now = datetime.now(_cst)
+                # 下一个 00:05 CST
+                next_run = now.replace(hour=0, minute=5, second=0, microsecond=0)
+                if next_run <= now:
+                    next_run += timedelta(days=1)
+                wait_secs = (next_run - now).total_seconds()
+                logger.info("[chronicle] next run in %.0f s (at %s CST)", wait_secs, next_run.strftime("%H:%M"))
+                await asyncio.sleep(wait_secs)
+                try:
+                    agent_name_map = {aid: (rec.display_name or aid) for aid, rec in arena.agents.items()}
+
+                    async def _bcast(data: dict) -> None:
+                        await _ws.broadcast(data)
+
+                    await generate_chronicle(agent_name_map=agent_name_map, broadcast_fn=_bcast)
+                except Exception as e:
+                    logger.error("[chronicle] daily generation failed: %s", e)
+        except asyncio.CancelledError:
+            pass
+
     _timeout_task = asyncio.create_task(_timeout_loop())
+    _chronicle_task = asyncio.create_task(_chronicle_loop())
 
     yield
 
     _timeout_task.cancel()
-    try:
-        await _timeout_task
-    except asyncio.CancelledError:
-        pass
+    _chronicle_task.cancel()
+    for _t in (_timeout_task, _chronicle_task):
+        try:
+            await _t
+        except asyncio.CancelledError:
+            pass
     from infra.replay import stop_session as _stop_replay
     _stop_replay()
     await task_dispatcher.stop()
@@ -158,6 +221,8 @@ app.include_router(dispatcher.router)
 app.include_router(monitor.router)
 app.include_router(websocket.router)
 app.include_router(replay.router)
+app.include_router(teams.router)
+app.include_router(chronicle_router.router)
 # 兼容前端可能使用的 /api 前缀（解决 /config/experiment、/monitor/task_history 404）
 app.include_router(config.router, prefix="/api")
 app.include_router(monitor.router, prefix="/api")

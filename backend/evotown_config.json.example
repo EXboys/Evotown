@@ -23,5 +23,10 @@
   "timeouts": {
     "task_timeout_seconds": 600,
     "judge_timeout_seconds": 60
+  },
+  "team": {
+    "reorganize_interval_tasks": 20,
+    "cost_stay": 10,
+    "max_team_ratio": 0.4
   }
 }

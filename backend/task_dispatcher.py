@@ -52,27 +52,27 @@ NGRAM_SIMILARITY_THRESHOLD = 0.5
 HISTORY_DEDUP_LIMIT = 300
 
 TASK_GEN_PROMPT = """\
-You are a task designer for an AI agent arena. Generate tasks to **drive agent evolution** (skills, rules, memory).
-Tools available: web search, file ops, code exec, calc, text. NO real-time weather API.
+汝乃三国·孔明传之军令官，专为麾下谋士发布军令，驱动其习得奇谋、立下战功。
+可用工具：搜索、文件操作、代码执行、计算、文本处理。禁用实时天气 API。
 
-Evolution goal: Tasks MUST require **2+ tool calls** (evolution engine counts meaningful decisions only when total_tools>=2).
-- easy: 至少2个工具（如 list_dir+read_file、search+calc）
-- medium: 2步以上，搜索+计算/代码 或 多源比较
-- hard: 多步推理、组合多种工具、需归纳规律
+军令要义（进化引擎以 total_tools≥2 计入有效晋阶）：
+- easy（传令）：至少2工具，如 list_dir+read_file、search+calc
+- medium（会战）：2步以上，搜索+计算/代码 或 多源比较
+- hard（决战）：多步推理、组合多工具、需归纳规律
 
-Difficulty distribution hint: {difficulty_hint}
+难度分配军令：{difficulty_hint}
 
-Rules:
-- Each task 4-20 chars. Chinese only. Verifiable.
-- **CRITICAL**: Every task must need 2+ tools. No 0-tool memory questions (e.g. "中国首都", "3的平方").
-- Prefer: search+calc, search+code, file+code; comparison/sorting; tasks with retry potential.
-- Do NOT generate weather tasks (no weather API).
-- **Avoid tasks similar to existing ones** (see user message).
-- Generate exactly {count} tasks, each on a UNIQUE topic/domain.
+制令规矩：
+- 每条军令 4~20 字，仅用中文，结果可验证。
+- **要害**：每令必须调用 2+ 工具。不可仅凭记忆作答（如"中国首都"、"3的平方"）。
+- 优先：搜索+计算、搜索+代码、文件+代码；多项对比排序；可重试演练之令。
+- 禁出天气军令（无天气 API）。
+- **勿与既有军令雷同**（见用户消息中的历史军令）。
+- 生成恰好 {count} 条军令，每令主题各异。
 
 {evolution_context_section}
 
-JSON: {{"tasks": [{{"text": "短任务", "difficulty": "easy|medium|hard"}}, ...]}}
+以 JSON 回令：{{"tasks": [{{"text": "军令简述", "difficulty": "easy|medium|hard"}}, ...]}}
 """
 
 # 任务主题：20+ 领域，覆盖更广的能力域，引导进化多样性
@@ -105,6 +105,14 @@ TASK_THEMES = [
     "地理+数学：地图数据与几何计算",
     "科学+编程：物理/化学公式编程验证",
     "语言处理：词频统计/句子分析",
+    # 三国·军令专项（孔明传主题）
+    "三国地理：查州郡城池距离/面积并运算",
+    "兵力推演：搜索史料兵力数据并对比计算",
+    "谋士策略：查历史典故并推理最优路线",
+    "粮草计算：搜索行军距离/速度推算补给周期",
+    "战役复盘：查史书数据并用代码模拟胜负",
+    "名将排名：多维度搜索三国武将数据并排序",
+    "外交连横：搜索各国/势力数据并比较实力",
 ]
 
 # 种子任务：30 条，覆盖更多领域，LLM 失败时 fallback 使用
@@ -148,6 +156,15 @@ SEED_TASKS: list[TaskItem] = [
     # 综合难题
     ("搜索前10大国GDP并找出中位数", "hard"),
     ("查询并验证欧拉公式 e^(iπ)+1=0", "hard"),
+    # 三国·军令专项
+    ("搜索赤壁之战兵力并计算双方比例", "medium"),
+    ("查询三国鼎立时期各国面积并排序", "medium"),
+    ("搜索诸葛亮北伐次数并统计成败", "easy"),
+    ("用代码模拟官渡之战双方消耗对比", "hard"),
+    ("搜索三国时期主要战役并按年排序", "medium"),
+    ("查蜀道距离并计算行军天数", "medium"),
+    ("搜索三国名将寿命并计算平均年龄", "medium"),
+    ("比较曹魏/蜀汉/东吴疆域面积", "hard"),
 ]
 
 

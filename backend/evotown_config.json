@@ -15,5 +15,10 @@
     "auto_trigger": true,
     "interval_tasks": 3,
     "on_failure": true
+  },
+  "team": {
+    "reorganize_interval_tasks": 20,
+    "cost_stay": 10,
+    "max_team_ratio": 0.4
   }
 }

@@ -89,6 +89,65 @@ class PongMsg(TypedDict):
     ts: str
 
 
+class TeamMemberInfo(TypedDict):
+    agent_id: str
+    display_name: str
+
+
+class TeamInfo(TypedDict):
+    team_id: str
+    name: str
+    members: list[TeamMemberInfo]
+
+
+class TeamFormedMsg(TypedDict):
+    """结阵事件：队伍分配完成，广播全量队伍信息"""
+    type: Literal["team_formed"]
+    teams: list[TeamInfo]
+
+
+class RescueEventMsg(TypedDict):
+    """救援事件：同队 agent 完成军功转移"""
+    type: Literal["rescue_event"]
+    donor_id: str
+    donor_display_name: str
+    target_id: str
+    target_display_name: str
+    amount: int
+    donor_balance: int
+    target_balance: int
+    team_id: str
+    team_name: str
+
+
+class RescueNeededMsg(TypedDict):
+    """危机预警：agent 军功值低于阈值，向同队广播救援请求"""
+    type: Literal["rescue_needed"]
+    agent_id: str
+    display_name: str
+    balance: int
+    team_id: str
+    team_name: str
+
+
+class TeamReorganizedMsg(TypedDict):
+    """社会重组事件：每 N 轮任务触发，弱队瓦解，强队缴税留存"""
+    type: Literal["team_reorganized"]
+    survived_teams: list[str]        # 存活队伍 team_id 列表
+    dissolved_teams: list[str]       # 解散队伍 team_id 列表
+    dissolved_team_names: list[str]  # 解散队伍名称（可读）
+    refugees: list[str]              # 进入流民池的 agent_id 列表
+    cost_stay: int                   # 强队每人扣除的维系军功
+    global_task_count: int           # 触发重组时的全局任务累计数
+
+
+class ChroniclePublishedMsg(TypedDict):
+    """每日文言文战报发布事件"""
+    type: Literal["chronicle_published"]
+    date: str      # YYYY-MM-DD
+    preview: str   # 战报前 200 字，供前端气泡展示
+
+
 # 服务端可广播的消息类型
 WsOutgoingMsg = (
     StateSnapshotMsg
@@ -102,6 +161,11 @@ WsOutgoingMsg = (
     | AgentCreatedMsg
     | EvolutionEventMsg
     | PongMsg
+    | TeamFormedMsg
+    | RescueEventMsg
+    | RescueNeededMsg
+    | TeamReorganizedMsg
+    | ChroniclePublishedMsg
 )
 
 

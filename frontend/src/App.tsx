@@ -3,6 +3,7 @@ import { TownLayout } from "./components/TownLayout";
 import { ObserverPanel } from "./components/ObserverPanel";
 import { LandingPage } from "./components/LandingPage";
 import { TaskHistoryPage } from "./components/TaskHistoryPage";
+import { ChronicleBook } from "./components/ChronicleBook";
 
 function ArenaApp() {
   return (
@@ -22,6 +23,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/arena" element={<ArenaApp />} />
         <Route path="/task-history" element={<TaskHistoryPage />} />
+        <Route path="/chronicle" element={<ChronicleBook />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

@@ -4,7 +4,7 @@ import logging
 import random
 from pathlib import Path
 
-from core.config import load_economy_config, load_evolution_config, load_timeout_config
+from core.config import load_economy_config, load_evolution_config, load_timeout_config, load_team_config
 from core.deps import arena, process_mgr, monitor, task_dispatcher, ws
 
 # 工具名 → 建筑（中文标签）映射：agent 调用工具时进入对应建筑
@@ -78,6 +78,31 @@ async def broadcast_evolution_event(data: dict) -> None:
     await ws.send_evolution_event(**data)
 
 
+async def _trigger_reorganize_background(global_count: int, team_cfg: dict) -> None:
+    """后台执行社会重组逻辑并广播结果。"""
+    cost_stay = team_cfg.get("cost_stay", 10)
+    max_team_ratio = team_cfg.get("max_team_ratio", 0.4)
+    try:
+        result = arena.reorganize_teams(cost_stay=cost_stay, max_team_ratio=max_team_ratio)
+        _persist()
+        logger.info(
+            "[reorganize] 全局任务 #%d：存活 %d 队，解散 %d 队（%s），流民 %d 人，每人扣 %d 军功",
+            global_count, len(result.survived_teams), len(result.dissolved_teams),
+            "、".join(result.dissolved_team_names) or "无",
+            len(result.refugees), result.cost_stay,
+        )
+        await ws.send_team_reorganized(
+            survived_teams=result.survived_teams,
+            dissolved_teams=result.dissolved_teams,
+            dissolved_team_names=result.dissolved_team_names,
+            refugees=result.refugees,
+            cost_stay=result.cost_stay,
+            global_task_count=global_count,
+        )
+    except Exception as e:
+        logger.error("[reorganize] 重组失败: %s", e)
+
+
 async def trigger_evolve_background(agent_id: str, agent_home: str) -> None:
     try:
         ok, msg = await process_mgr.trigger_evolve(agent_id, agent_home)
@@ -130,6 +155,181 @@ def _update_evolution_context() -> None:
     task_dispatcher.set_evolution_context(summaries)
 
 
+async def _run_judge(
+    agent_id: str,
+    task_text: str,
+    response: str,
+    tool_total: int,
+    tool_failed: int,
+    tool_calls: list,
+) -> "JudgeResult":
+    """步骤①：调用 LLM Judge，超时后降级到工具成功率兜底。"""
+    timeout_cfg = load_timeout_config()
+    judge_timeout = timeout_cfg.get("judge_timeout_seconds", 60)
+    try:
+        result = await asyncio.wait_for(
+            judge_task(task_text, response, tool_total, tool_failed, tool_calls=tool_calls),
+            timeout=float(judge_timeout),
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[%s] judge LLM timeout after %ds, using fallback", agent_id, judge_timeout)
+        success_rate = (tool_total - tool_failed) / max(tool_total, 1)
+        score = int(success_rate * 7)
+        result = JudgeResult(
+            completion=score,
+            quality=score,
+            efficiency=score,
+            reason=f"Judge timeout, fallback based on {success_rate:.0%} tool success rate.",
+            skipped=True,
+        )
+    logger.info(
+        "[%s] judge: score=%d reward=%d reason=%s",
+        agent_id, result.total_score, result.reward, result.reason,
+    )
+    return result
+
+
+async def _run_balance_and_broadcast(
+    agent_id: str,
+    judge_result: "JudgeResult",
+    task_text: str,
+    difficulty: str,
+    done_data: dict,
+) -> None:
+    """步骤②：更新余额并广播任务完成事件。"""
+    cfg = _economy()
+    arena.add_balance(agent_id, judge_result.reward, cfg["initial_balance"])
+    a = arena.get_agent(agent_id)
+    assert a is not None
+    await ws.send_task_complete(
+        agent_id,
+        judge_result.completion >= 5,
+        a.balance,
+        judge_result.to_dict(),
+        task=task_text,
+        difficulty=difficulty,
+    )
+
+
+def _run_record(
+    agent_id: str,
+    judge_result: "JudgeResult",
+    task_text: str,
+    difficulty: str,
+    task_id: str,
+    elapsed_ms: int,
+    done_data: dict,
+) -> None:
+    """步骤③：持久化任务历史记录（含难度统计 + 拒绝次数）。"""
+    from core.deps import experiment_id
+    arena.record_task_difficulty(agent_id, difficulty)
+    refusal_counts = count_refusals_by_task()
+    refusal_count = refusal_counts.get((task_text or "").strip(), 0)
+    append_task_record(
+        experiment_id=experiment_id or "unknown",
+        task_id=task_id,
+        agent_id=agent_id,
+        task=task_text,
+        difficulty=difficulty,
+        judge_result=judge_result.to_dict(),
+        elapsed_ms=elapsed_ms,
+        success=judge_result.completion >= 5,
+        timeout=done_data.get("timeout", False),
+        refusal_count=refusal_count,
+    )
+    _persist()
+
+
+def _run_evolution_check(agent_id: str, judge_result: "JudgeResult") -> None:
+    """步骤④：按配置判断是否触发个体进化（后台 task，不 await）。"""
+    evo_cfg = load_evolution_config()
+    if not evo_cfg["auto_trigger"]:
+        return
+    a = arena.get_agent(agent_id)
+    if a is None:
+        return
+    count = arena.inc_task_count(agent_id)
+    task_failed = judge_result.completion < 5
+    interval = evo_cfg["interval_tasks"]
+    on_fail = evo_cfg["on_failure"]
+    last_evolve = arena.get_last_evolve_at(agent_id)
+    periodic = count % interval == 0
+    failure_cooldown = evo_cfg.get("failure_cooldown", 1)
+    failure_trigger = on_fail and task_failed and (count - last_evolve) >= failure_cooldown
+    if periodic or failure_trigger:
+        arena.set_last_evolve_at(agent_id, count)
+        # ★ 优先用 agent_home；若 fallback 到 chat_dir（含 /chat 后缀），需取其 parent
+        agent_home = a.agent_home
+        if not agent_home:
+            cd = a.chat_dir or ""
+            agent_home = str(Path(cd).parent) if cd.rstrip("/").endswith("/chat") else cd
+        if agent_home:
+            asyncio.create_task(trigger_evolve_background(agent_id, agent_home))
+
+
+def _run_social_reorganize() -> None:
+    """步骤⑤：全局任务计数 +1，满 N 次触发社会重组（后台 task，不 await）。"""
+    global_count = arena.inc_global_task_count()
+    team_cfg = load_team_config()
+    reorg_interval = team_cfg.get("reorganize_interval_tasks", 20)
+    if arena.list_teams() and global_count % reorg_interval == 0:
+        asyncio.create_task(_trigger_reorganize_background(global_count, team_cfg))
+
+
+async def _run_elimination_check(agent_id: str) -> None:
+    """步骤⑥：余额归零时淘汰 agent。"""
+    cfg = _economy()
+    a = arena.get_agent(agent_id)
+    if a is None or not cfg["eliminate_on_zero"] or a.balance > 0:
+        return
+    from infra.eliminated_agents import append_eliminated
+    removed = arena.remove_agent(agent_id)
+    if removed:
+        append_eliminated(
+            agent_id,
+            reason="balance_zero",
+            final_balance=removed.balance,
+            soul_type=removed.soul_type or "balanced",
+            display_name=removed.display_name or agent_id,
+        )
+        if removed._observer:
+            removed._observer.stop()
+            await asyncio.to_thread(removed._observer.join, 2)
+    await process_mgr.kill(agent_id)
+    await ws.send_agent_eliminated(agent_id, "balance_zero")
+    _persist()
+
+
+async def _post_task_pipeline(
+    agent_id: str,
+    task_text: str,
+    difficulty: str,
+    task_id: str,
+    response: str,
+    tool_total: int,
+    tool_failed: int,
+    tool_calls: list,
+    elapsed_ms: int,
+    done_data: dict,
+) -> None:
+    """任务完成后的完整处理流水线（六步）。"""
+    # ① Judge
+    judge_result = await _run_judge(agent_id, task_text, response, tool_total, tool_failed, tool_calls)
+    # ② 余额更新 + WS 广播
+    await _run_balance_and_broadcast(agent_id, judge_result, task_text, difficulty, done_data)
+    # ③ 持久化历史
+    _run_record(agent_id, judge_result, task_text, difficulty, task_id, elapsed_ms, done_data)
+    # ── 多样性优化：将本次结果反馈给任务分发器 ──────────────────────────────
+    task_dispatcher.record_outcome(judge_result.completion >= 5)
+    _update_evolution_context()
+    # ④ 个体进化检查
+    _run_evolution_check(agent_id, judge_result)
+    # ⑤ 社会重组检查
+    _run_social_reorganize()
+    # ⑥ 淘汰检查
+    await _run_elimination_check(agent_id)
+
+
 async def on_task_done(
     agent_id: str,
     success: bool,
@@ -153,118 +353,19 @@ async def on_task_done(
         meta = arena.pop_pending_task(agent_id)
         task_text = meta["task"] if meta else ""
 
-    response = done_data.get("response", "")
-    tool_total = exe.tool_total if exe else 0
-    tool_failed = exe.tool_failed if exe else 0
-    tool_calls = exe.tool_calls if exe else []
-
     try:
-        timeout_cfg = load_timeout_config()
-        judge_timeout = timeout_cfg.get("judge_timeout_seconds", 60)
-        try:
-            judge_result = await asyncio.wait_for(
-                judge_task(task_text, response, tool_total, tool_failed, tool_calls=tool_calls),
-                timeout=float(judge_timeout),
-            )
-        except asyncio.TimeoutError:
-            logger.warning("[%s] judge LLM timeout after %ds, using fallback", agent_id, judge_timeout)
-            success_rate = (tool_total - tool_failed) / max(tool_total, 1)
-            score = int(success_rate * 7)
-            judge_result = JudgeResult(
-                completion=score,
-                quality=score,
-                efficiency=score,
-                reason=f"Judge timeout, fallback based on {success_rate:.0%} tool success rate.",
-                skipped=True,
-            )
-
-        logger.info(
-            "[%s] judge: score=%d reward=%d reason=%s",
-            agent_id,
-            judge_result.total_score,
-            judge_result.reward,
-            judge_result.reason,
-        )
-
-        cfg = _economy()
-        arena.add_balance(agent_id, judge_result.reward, cfg["initial_balance"])
-        a = arena.get_agent(agent_id)
-        assert a is not None
-
-        difficulty = meta.get("difficulty", "medium") if meta else "medium"
-        await ws.send_task_complete(
-            agent_id,
-            judge_result.completion >= 5,
-            a.balance,
-            judge_result.to_dict(),
-            task=task_text,
-            difficulty=difficulty,
-        )
-        # 持久化任务/评分历史（含认领者、认领前被拒绝次数）
-        task_id = meta.get("task_id", "") if meta else ""
-        elapsed_ms = exe.elapsed_ms if exe else 0
-        arena.record_task_difficulty(agent_id, difficulty)
-        from core.deps import experiment_id
-        refusal_counts = count_refusals_by_task()
-        refusal_count = refusal_counts.get((task_text or "").strip(), 0)
-        append_task_record(
-            experiment_id=experiment_id or "unknown",
-            task_id=task_id,
+        await _post_task_pipeline(
             agent_id=agent_id,
-            task=task_text,
-            difficulty=difficulty,
-            judge_result=judge_result.to_dict(),
-            elapsed_ms=elapsed_ms,
-            success=judge_result.completion >= 5,
-            timeout=done_data.get("timeout", False),
-            refusal_count=refusal_count,
+            task_text=task_text,
+            difficulty=meta.get("difficulty", "medium") if meta else "medium",
+            task_id=meta.get("task_id", "") if meta else "",
+            response=done_data.get("response", ""),
+            tool_total=exe.tool_total if exe else 0,
+            tool_failed=exe.tool_failed if exe else 0,
+            tool_calls=exe.tool_calls if exe else [],
+            elapsed_ms=exe.elapsed_ms if exe else 0,
+            done_data=done_data,
         )
-        _persist()
-
-        # ── 多样性优化：将本次结果反馈给任务分发器 ──────────────────────────
-        task_success = judge_result.completion >= 5
-        task_dispatcher.record_outcome(task_success)
-        _update_evolution_context()
-
-        evo_cfg = load_evolution_config()
-        if evo_cfg["auto_trigger"]:
-            count = arena.inc_task_count(agent_id)
-            task_failed = judge_result.completion < 5
-            interval = evo_cfg["interval_tasks"]
-            on_fail = evo_cfg["on_failure"]
-            last_evolve = arena.get_last_evolve_at(agent_id)
-            periodic = count % interval == 0
-            failure_cooldown = evo_cfg.get("failure_cooldown", 1)
-            failure_trigger = on_fail and task_failed and (count - last_evolve) >= failure_cooldown
-            should_evolve = periodic or failure_trigger
-            if should_evolve:
-                arena.set_last_evolve_at(agent_id, count)
-                # ★ 优先用 agent_home；若 fallback 到 chat_dir（含 /chat 后缀），需取其 parent
-                agent_home = a.agent_home
-                if not agent_home:
-                    cd = a.chat_dir or ""
-                    agent_home = str(Path(cd).parent) if cd.rstrip("/").endswith("/chat") else cd
-                if agent_home:
-                    asyncio.create_task(trigger_evolve_background(agent_id, agent_home))
-
-        if cfg["eliminate_on_zero"] and a.balance <= 0:
-            from infra.eliminated_agents import append_eliminated
-
-            removed = arena.remove_agent(agent_id)
-            if removed:
-                append_eliminated(
-                    agent_id,
-                    reason="balance_zero",
-                    final_balance=removed.balance,
-                    soul_type=removed.soul_type or "balanced",
-                    display_name=removed.display_name or agent_id,
-                )
-                if removed._observer:
-                    removed._observer.stop()
-                    await asyncio.to_thread(removed._observer.join, 2)
-            await process_mgr.kill(agent_id)
-            await ws.send_agent_eliminated(agent_id, "balance_zero")
-            _persist()
     finally:
         arena.set_in_task(agent_id, False)
 
@@ -318,25 +419,112 @@ def _format_arena_context(
     )
 
 
+def _format_team_section(team_ctx: dict) -> str:
+    """将 get_team_context() 的返回值格式化为 system prompt 片段（英文）。
+
+    示例输出：
+    ## Team Context (社会生存压力)
+    - You belong to: 蜀汉联盟 (Rank 2 / 3 teams)
+    - Your teammates: 赵子龙 (150 merit), 关云长 (80 merit)
+    - Team average merit: 115.0 | Global average: 105.0 → Your team is STRONG ✅
+    - WARNING: Your team is WEAK ⚠️ — at risk of dissolution at the next reorganization!
+    - Tip: Help your team stay above the global average to avoid being disbanded.
+    """
+    team_name = team_ctx["team_name"]
+    rank = team_ctx["team_rank"]
+    total = team_ctx["total_teams"]
+    team_avg = team_ctx["team_avg"]
+    global_avg = team_ctx["global_avg"]
+    is_strong = team_ctx["is_strong"]
+    teammates = team_ctx["teammates"]
+
+    if teammates:
+        mate_str = ", ".join(f"{name} ({bal} merit)" for name, bal in teammates)
+    else:
+        mate_str = "none (you are the sole member)"
+
+    status_line = (
+        f"Team average merit: {team_avg} | Global average: {global_avg} → Your team is STRONG ✅"
+        if is_strong
+        else (
+            f"Team average merit: {team_avg} | Global average: {global_avg} → "
+            "Your team is WEAK ⚠️ — at risk of dissolution at the next reorganization!"
+        )
+    )
+
+    tip = (
+        "Keep performing well to maintain your team's strength and pay the maintenance cost."
+        if is_strong
+        else "Complete tasks successfully to raise your team's average merit and avoid disbandment."
+    )
+
+    return (
+        "\n## Team Context (社会生存压力)\n"
+        f"- You belong to: {team_name} (Rank {rank} / {total} teams)\n"
+        f"- Your teammates: {mate_str}\n"
+        f"- {status_line}\n"
+        f"- Tip: {tip}"
+    )
+
+
+def _format_evolution_focus_section(focus: str) -> str:
+    """将 agent 的进化方向偏好格式化为 system prompt 片段。"""
+    from domain.arena import EVOLUTION_FOCUS_OPTIONS
+    if not focus:
+        return ""
+    desc = EVOLUTION_FOCUS_OPTIONS.get(focus, focus)
+    return (
+        "\n## Evolution Focus (自选进化方向)\n"
+        f"- Your chosen path: **{focus}** — {desc}\n"
+        "- Lean into tasks that align with your focus. Specialization builds a stronger identity "
+        "and creates complementary diversity within your team."
+    )
+
+
 def _build_context_for_agent(agent_id: str, difficulty: str) -> dict | None:
-    """为指定 agent 构建 arena context。"""
+    """为指定 agent 构建 arena context（含团队社会状态 + 进化方向）。"""
     cfg = _economy()
     if not arena.has_agent(agent_id):
         return None
     a = arena.get_agent(agent_id)
     if a is None:
         return None
-    return {
-        "append": _format_arena_context(
-            balance=a.balance,
-            cost_accept=cfg["cost_accept"],
-            reward_complete=cfg["reward_complete"],
-            penalty_fail=cfg["penalty_fail"],
-            penalty_refuse=cfg.get("penalty_refuse", 0),
-            eliminate_on_zero=cfg["eliminate_on_zero"],
-            task_difficulty=difficulty,
+
+    base = _format_arena_context(
+        balance=a.balance,
+        cost_accept=cfg["cost_accept"],
+        reward_complete=cfg["reward_complete"],
+        penalty_fail=cfg["penalty_fail"],
+        penalty_refuse=cfg.get("penalty_refuse", 0),
+        eliminate_on_zero=cfg["eliminate_on_zero"],
+        task_difficulty=difficulty,
+    )
+
+    # ── 进化方向偏好（若有）─────────────────────────────────────────────────
+    if a.evolution_focus:
+        base += _format_evolution_focus_section(a.evolution_focus)
+
+    # ── 队伍社会状态 ──────────────────────────────────────────────────────────
+    team_ctx = arena.get_team_context(agent_id)
+    if team_ctx:
+        base += _format_team_section(team_ctx)
+    elif a.solo_preference:
+        # 主动自由人：强调这是 agent 自己的选择
+        base += (
+            "\n## Team Context (社会生存压力)\n"
+            "- You are a FREE AGENT (自由人) — you have chosen to remain independent.\n"
+            "- You will not be assigned to teams during reorganizations unless you change your preference.\n"
+            "- Solo path: succeed alone, keep all merits to yourself, but bear all risks without allies."
         )
-    }
+    else:
+        # 被动流民：尚未被分配到队伍
+        base += (
+            "\n## Team Context (社会生存压力)\n"
+            "- You are currently a REFUGEE (流民) — not yet affiliated with any team.\n"
+            "- Complete tasks to demonstrate your value and earn a place in a team at the next reorganization."
+        )
+
+    return {"append": base}
 
 
 async def _inject_and_dispatch(

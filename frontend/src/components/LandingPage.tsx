@@ -69,6 +69,12 @@ export function LandingPage() {
           >
             🚀 进入竞技场
           </button>
+          <button
+            onClick={() => navigate("/chronicle")}
+            className="rounded-lg border border-amber-700/60 px-8 py-3 text-amber-400 font-medium text-base hover:border-amber-500 hover:text-amber-300 transition-colors"
+          >
+            📜 三国·进化演绎
+          </button>
           <a
             href="https://github.com/evotown-org/evotown"
             target="_blank"

@@ -18,6 +18,11 @@ from ws_messages import (
     TaskExpiredMsg,
     EvolutionEventMsg,
     PongMsg,
+    TeamFormedMsg,
+    TeamInfo,
+    RescueEventMsg,
+    RescueNeededMsg,
+    TeamReorganizedMsg,
 )
 
 logger = logging.getLogger("evotown.ws")
@@ -216,6 +221,106 @@ class WsDispatcher:
 
     async def send_pong(self) -> None:
         await self.broadcast(self.pong())
+
+    # ── 结阵消息 ───────────────────────────────────────────────────────────────
+
+    def team_formed(self, teams: list[TeamInfo]) -> TeamFormedMsg:
+        return {"type": "team_formed", "teams": teams}
+
+    def rescue_event(
+        self,
+        donor_id: str,
+        donor_display_name: str,
+        target_id: str,
+        target_display_name: str,
+        amount: int,
+        donor_balance: int,
+        target_balance: int,
+        team_id: str,
+        team_name: str,
+    ) -> RescueEventMsg:
+        return {
+            "type": "rescue_event",
+            "donor_id": donor_id,
+            "donor_display_name": donor_display_name,
+            "target_id": target_id,
+            "target_display_name": target_display_name,
+            "amount": amount,
+            "donor_balance": donor_balance,
+            "target_balance": target_balance,
+            "team_id": team_id,
+            "team_name": team_name,
+        }
+
+    def rescue_needed(
+        self,
+        agent_id: str,
+        display_name: str,
+        balance: int,
+        team_id: str,
+        team_name: str,
+    ) -> RescueNeededMsg:
+        return {
+            "type": "rescue_needed",
+            "agent_id": agent_id,
+            "display_name": display_name,
+            "balance": balance,
+            "team_id": team_id,
+            "team_name": team_name,
+        }
+
+    async def send_team_formed(self, teams: list[TeamInfo]) -> None:
+        await self.broadcast(self.team_formed(teams))
+
+    async def send_rescue_event(self, **kwargs: Any) -> None:
+        await self.broadcast(self.rescue_event(**kwargs))
+
+    async def send_rescue_needed(
+        self,
+        agent_id: str,
+        display_name: str,
+        balance: int,
+        team_id: str,
+        team_name: str,
+    ) -> None:
+        await self.broadcast(
+            self.rescue_needed(agent_id, display_name, balance, team_id, team_name)
+        )
+
+    def team_reorganized(
+        self,
+        survived_teams: list[str],
+        dissolved_teams: list[str],
+        dissolved_team_names: list[str],
+        refugees: list[str],
+        cost_stay: int,
+        global_task_count: int,
+    ) -> TeamReorganizedMsg:
+        return {
+            "type": "team_reorganized",
+            "survived_teams": survived_teams,
+            "dissolved_teams": dissolved_teams,
+            "dissolved_team_names": dissolved_team_names,
+            "refugees": refugees,
+            "cost_stay": cost_stay,
+            "global_task_count": global_task_count,
+        }
+
+    async def send_team_reorganized(
+        self,
+        survived_teams: list[str],
+        dissolved_teams: list[str],
+        dissolved_team_names: list[str],
+        refugees: list[str],
+        cost_stay: int,
+        global_task_count: int,
+    ) -> None:
+        await self.broadcast(
+            self.team_reorganized(
+                survived_teams, dissolved_teams, dissolved_team_names,
+                refugees, cost_stay, global_task_count,
+            )
+        )
 
 
 # 入站消息处理器类型

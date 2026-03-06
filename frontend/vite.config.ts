@@ -12,6 +12,7 @@ export default defineConfig({
       "/dispatcher": { target: "http://127.0.0.1:8765", changeOrigin: true },
       "/monitor": { target: "http://127.0.0.1:8765", changeOrigin: true },
       "/replay": { target: "http://127.0.0.1:8765", changeOrigin: true },
+      "/chronicle": { target: "http://127.0.0.1:8765", changeOrigin: true },
       "/ws": { target: "ws://127.0.0.1:8765", ws: true },
     },
   },

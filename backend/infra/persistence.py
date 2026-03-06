@@ -21,14 +21,20 @@ def load_state(experiment_id: str | None = None) -> dict[str, Any]:
         path_to_read = _LEGACY_STATE_PATH
         logger.info("Migrating arena_state.json from legacy path to data volume")
 
+    empty: dict[str, Any] = {
+        "agent_counter": 0, "task_counter": 0, "global_task_counter": 0,
+        "agents": [], "teams": [], "experiment_id": experiment_id,
+    }
     if path_to_read is None:
-        return {"agent_counter": 0, "task_counter": 0, "agents": [], "experiment_id": experiment_id}
+        return empty
     try:
         data = json.loads(path_to_read.read_text(encoding="utf-8"))
         result: dict[str, Any] = {
             "agent_counter": int(data.get("agent_counter", 0)),
             "task_counter": int(data.get("task_counter", 0)),
+            "global_task_counter": int(data.get("global_task_counter", 0)),
             "agents": data.get("agents", []),
+            "teams": data.get("teams", []),
         }
         if "experiment_id" in data:
             result["experiment_id"] = data["experiment_id"]
@@ -37,7 +43,7 @@ def load_state(experiment_id: str | None = None) -> dict[str, Any]:
         return result
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Failed to load arena state: %s", e)
-        return {"agent_counter": 0, "task_counter": 0, "agents": [], "experiment_id": experiment_id}
+        return empty
 
 
 def save_state(
@@ -45,9 +51,12 @@ def save_state(
     agents: list[dict[str, Any]],
     experiment_id: str | None = None,
     task_counter: int | None = None,
+    global_task_counter: int = 0,
+    teams: list[dict[str, Any]] | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "agent_counter": agent_counter,
+        "global_task_counter": global_task_counter,
         "agents": [
             {
                 "id": a.get("id"),
@@ -55,9 +64,15 @@ def save_state(
                 "balance": a.get("balance", 100),
                 "status": a.get("status", "active"),
                 "soul_type": a.get("soul_type", "balanced"),
+                "team_id": a.get("team_id"),
+                "rescue_given": a.get("rescue_given", 0),
+                "rescue_received": a.get("rescue_received", 0),
+                "solo_preference": a.get("solo_preference", False),
+                "evolution_focus": a.get("evolution_focus", ""),
             }
             for a in agents
         ],
+        "teams": teams or [],
     }
     if experiment_id:
         payload["experiment_id"] = experiment_id

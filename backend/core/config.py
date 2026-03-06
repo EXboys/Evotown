@@ -80,6 +80,30 @@ def load_evolution_config() -> dict[str, Any]:
     return defaults
 
 
+def load_team_config() -> dict[str, Any]:
+    """团队重组配置：重组间隔任务数、强队维系成本、防垄断上限比"""
+    data = _load_json()
+    team = data.get("team", {})
+    defaults = {
+        "reorganize_interval_tasks": int(team.get("reorganize_interval_tasks", 20)),
+        "cost_stay": int(team.get("cost_stay", 10)),
+        "max_team_ratio": float(team.get("max_team_ratio", 0.4)),
+    }
+    env_map = {
+        "EVOTOWN_REORGANIZE_INTERVAL": ("reorganize_interval_tasks", int),
+        "EVOTOWN_COST_STAY": ("cost_stay", int),
+        "EVOTOWN_MAX_TEAM_RATIO": ("max_team_ratio", float),
+    }
+    for env_key, (cfg_key, conv) in env_map.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            try:
+                defaults[cfg_key] = conv(val)
+            except (ValueError, TypeError):
+                pass
+    return defaults
+
+
 def load_timeout_config() -> dict[str, Any]:
     """超时配置：任务执行超时、Judge LLM 调用超时"""
     data = _load_json()
