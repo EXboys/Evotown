@@ -35,12 +35,15 @@ services:
       - EVOTOWN_PENALTY_FAIL=${EVOTOWN_PENALTY_FAIL:-5}
       - EVOTOWN_COST_ACCEPT=${EVOTOWN_COST_ACCEPT:-5}
       - EVOTOWN_ELIMINATE_ON_ZERO=${EVOTOWN_ELIMINATE_ON_ZERO:-true}
-    # 允许 bubblewrap (bwrap) 在容器内创建用户命名空间（user namespaces）。
-    # Docker 默认 seccomp 配置会拦截 clone(CLONE_NEWUSER)，导致 bwrap 沙箱失败。
-    # seccomp:unconfined 仅放开容器本身的 syscall 过滤；
-    # bwrap 会对被沙箱化的 skill 进程施加独立的 seccomp BPF 过滤（见 linux.rs）。
+      # 安全配置
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+    # 使用定制 seccomp profile，允许 bubblewrap (bwrap) 创建 user namespace，
+    # 同时拦截最危险的内核级 syscall（kexec / module load / perf_event 等）。
+    # 比 seccomp:unconfined 更安全：默认 ALLOW 但明确 DENY 高危操作。
+    # bwrap 内部还会对 skill 子进程施加独立的 seccomp BPF 过滤（见 linux.rs）。
     security_opt:
-      - seccomp:unconfined
+      - seccomp:./seccomp-bwrap.json
     volumes:
       # 进化产物持久化
       - evotown_arena:/root/.skilllite/arena

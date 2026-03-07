@@ -1,19 +1,20 @@
 """分发器路由"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from core.auth import require_admin
 from core.deps import task_dispatcher
 
 router = APIRouter(prefix="/dispatcher", tags=["dispatcher"])
 
 
-@router.post("/start")
+@router.post("/start", dependencies=[Depends(require_admin)])
 async def start_dispatcher(interval: float = 30.0):
     task_dispatcher._interval = interval
     await task_dispatcher.start()
     return {"ok": True, "interval": interval, "pool_size": task_dispatcher.pool_size}
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[Depends(require_admin)])
 async def stop_dispatcher():
     """停止任务分发。已接任务的 agent 会继续执行直至完成，仅停止向任务板添加新任务。"""
     await task_dispatcher.stop()
@@ -32,7 +33,7 @@ async def dispatcher_status():
     }
 
 
-@router.post("/generate")
+@router.post("/generate", dependencies=[Depends(require_admin)])
 async def generate_tasks(count: int = 5):
     tasks = await task_dispatcher.generate_tasks(count)
     return {"ok": True, "generated": len(tasks), "tasks": tasks, "pool_size": task_dispatcher.pool_size}

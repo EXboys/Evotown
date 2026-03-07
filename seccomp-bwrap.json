@@ -1,0 +1,108 @@
+{
+  "_comment": "Custom seccomp profile for evotown backend.",
+  "_purpose": [
+    "Replaces seccomp:unconfined while still allowing bubblewrap (bwrap)",
+    "to create user namespaces (CLONE_NEWUSER / unshare).",
+    "Strategy: default ALLOW, but DENY the highest-risk kernel-level syscalls",
+    "that could enable container escape or kernel exploitation.",
+    "Blocked categories:",
+    "  - Kernel module loading  (init_module / finit_module / delete_module)",
+    "  - Live kernel patching   (kexec_load / kexec_file_load)",
+    "  - Raw I/O port access    (ioperm / iopl)",
+    "  - Kernel keyring admin   (add_key, request_key)",
+    "  - perf_event_open        (useful for side-channel timing attacks)",
+    "  - System clock manipulation (settimeofday / adjtimex / stime)",
+    "NOTE: pivot_root is intentionally NOT blocked — bwrap calls it internally",
+    "      to set up the sandboxed filesystem root inside its mount namespace.",
+    "      Blocking it here would break the entire bwrap sandbox."
+  ],
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "syscalls": [
+    {
+      "names": [
+        "kexec_load",
+        "kexec_file_load"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent loading a new kernel (container escape via kexec)"
+    },
+    {
+      "names": [
+        "init_module",
+        "finit_module",
+        "delete_module",
+        "create_module",
+        "query_module"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent loading/unloading kernel modules"
+    },
+    {
+      "names": [
+        "ioperm",
+        "iopl"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent raw hardware I/O port access (x86 port I/O instructions)"
+    },
+    {
+      "names": [
+        "perf_event_open"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent side-channel timing attacks via performance counters"
+    },
+    {
+      "names": [
+        "add_key",
+        "request_key"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent manipulation of the kernel keyring from container"
+    },
+    {
+      "names": [
+        "acct"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent enabling kernel process accounting"
+    },
+
+    {
+      "names": [
+        "settimeofday",
+        "clock_adjtime",
+        "adjtimex",
+        "stime"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent system clock manipulation"
+    },
+    {
+      "names": [
+        "syslog"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Prevent reading/clearing kernel log buffer (dmesg)"
+    },
+    {
+      "names": [
+        "nfsservctl",
+        "vm86",
+        "vm86old"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Obsolete/privileged syscalls with no legitimate container use"
+    }
+  ]
+}
+

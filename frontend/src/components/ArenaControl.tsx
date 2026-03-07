@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { evotownEvents } from "../phaser/events";
 import { useEvotownStore } from "../store/evotownStore";
 import type { JudgeScore, TaskRecord } from "../store/evotownStore";
+import { adminFetch } from "../hooks/useAdminToken";
 
 function ScoreBar({ label, value, max = 10 }: { label: string; value: number; max?: number }) {
   const pct = Math.min((value / max) * 100, 100);
@@ -109,7 +110,7 @@ export function ArenaControl() {
     setLoading(true);
     try {
       const endpoint = dispatcherState.running ? "/dispatcher/stop" : "/dispatcher/start";
-      const res = await fetch(endpoint, { method: "POST" });
+      const res = await adminFetch(endpoint, { method: "POST" });
       if (res.ok) {
         const data = await res.json();
         setDispatcherState({ running: !dispatcherState.running, ...data });
@@ -129,7 +130,7 @@ export function ArenaControl() {
     setLoading(true);
     setGenerateFeedback("");
     try {
-      const res = await fetch("/dispatcher/generate", { method: "POST" });
+      const res = await adminFetch("/dispatcher/generate", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         setDispatcherState({ pool_size: data.pool_size });

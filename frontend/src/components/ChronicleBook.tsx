@@ -7,6 +7,7 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { adminFetch } from "../hooks/useAdminToken";
 
 interface ChronicleListItem {
   date: string;
@@ -92,7 +93,7 @@ export function ChronicleBook() {
     setGenerating(true);
     setGenMsg("");
     try {
-      const r = await fetch(`/chronicle/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const r = await adminFetch(`/chronicle/generate`, { method: "POST", body: JSON.stringify({}) });
       if (!r.ok) {
         const errText = await r.text().catch(() => r.statusText);
         setGenMsg(`❌ 生成失败 (${r.status})：${errText.slice(0, 120)}`);

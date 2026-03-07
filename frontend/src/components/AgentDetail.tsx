@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { evotownEvents } from "../phaser/events";
 import { useEvotownStore } from "../store/evotownStore";
 import { ShareCard } from "./ShareCard";
+import { adminFetch } from "../hooks/useAdminToken";
 
 
 interface SoulData {
@@ -405,9 +406,8 @@ export function AgentDetail({
   const saveSoul = async () => {
     setSoulSaving(true);
     try {
-      const res = await fetch(`/agents/${agentId}/soul`, {
+      const res = await adminFetch(`/agents/${agentId}/soul`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: soulEdit }),
       });
       const data = await res.json();
@@ -424,7 +424,7 @@ export function AgentDetail({
     if (!window.confirm(`确定要删除 Agent「${displayName}」吗？删除后可从竞技场重新创建。`)) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/agents/${agentId}`, { method: "DELETE" });
+      const res = await adminFetch(`/agents/${agentId}`, { method: "DELETE" });
       if (res.ok) {
         removeAgent(agentId);
         evotownEvents.emit("agent_eliminated", { agent_id: agentId, reason: "user_deleted" });
@@ -626,7 +626,7 @@ export function AgentDetail({
                   setRepairing(true);
                   setRepairMsg(null);
                   try {
-                    const res = await fetch(`/agents/${agentId}/repair-skills`, { method: "POST" });
+                    const res = await adminFetch(`/agents/${agentId}/repair-skills`, { method: "POST" });
                     const data = await res.json();
                     setRepairMsg(data.ok ? "✅ 修复完成" : `❌ ${data.error ?? "修复失败"}`);
                     if (data.ok) {
@@ -691,7 +691,7 @@ export function AgentDetail({
                         <div className="flex gap-1.5 shrink-0">
                           <button
                             onClick={async () => {
-                              const res = await fetch(`/agents/${agentId}/skills/${s.name}/confirm`, { method: "POST" });
+                              const res = await adminFetch(`/agents/${agentId}/skills/${s.name}/confirm`, { method: "POST" });
                               const data = await res.json();
                               if (data.ok) {
                                 setSkills((prev) =>
@@ -705,7 +705,7 @@ export function AgentDetail({
                           </button>
                           <button
                             onClick={async () => {
-                              const res = await fetch(`/agents/${agentId}/skills/${s.name}/reject`, { method: "POST" });
+                              const res = await adminFetch(`/agents/${agentId}/skills/${s.name}/reject`, { method: "POST" });
                               const data = await res.json();
                               if (data.ok) {
                                 setSkills((prev) => prev.filter((sk) => sk.name !== s.name));

@@ -2,9 +2,10 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from core.auth import require_admin
 from core.deps import arena, ws
 from core.config import load_team_config
 from domain.arena import EVOLUTION_FOCUS_OPTIONS
@@ -40,7 +41,7 @@ class RescueRequest(BaseModel):
 
 # ── 路由实现 ──────────────────────────────────────────────────────────────────
 
-@router.post("/assign")
+@router.post("/assign", dependencies=[Depends(require_admin)])
 async def assign_teams(body: AssignTeamsRequest):
     """将当前所有活跃 agent 随机分成 num_teams 队（结阵）。
 
@@ -96,7 +97,7 @@ async def list_teams():
     return {"teams": result, "total": len(result)}
 
 
-@router.delete("")
+@router.delete("", dependencies=[Depends(require_admin)])
 async def dissolve_teams():
     """解散所有队伍，清空 agent.team_id"""
     arena.dissolve_teams()
@@ -104,7 +105,7 @@ async def dissolve_teams():
     return {"ok": True, "message": "所有队伍已解散"}
 
 
-@router.post("/agents/{agent_id}/rescue")
+@router.post("/agents/{agent_id}/rescue", dependencies=[Depends(require_admin)])
 async def rescue_agent(agent_id: str, body: RescueRequest):
     """队内救援：agent_id（施救者）向 target_id（受救者）转移军功值。
 
@@ -156,7 +157,7 @@ async def rescue_agent(agent_id: str, body: RescueRequest):
             "target_balance": target.balance if target else 0}
 
 
-@router.post("/reorganize")
+@router.post("/reorganize", dependencies=[Depends(require_admin)])
 async def manual_reorganize():
     """手动触发一次社会重组（无需等定时器，便于测试）。
 
@@ -196,7 +197,7 @@ async def manual_reorganize():
 
 
 
-@router.patch("/agents/{agent_id}/preference")
+@router.patch("/agents/{agent_id}/preference", dependencies=[Depends(require_admin)])
 async def set_agent_preference(agent_id: str, body: AgentPreferenceRequest):
     """设置 agent 的自治偏好：solo_preference（自由人模式）和 evolution_focus（进化方向）。
 

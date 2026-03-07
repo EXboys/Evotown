@@ -1,7 +1,17 @@
 """Evotown FastAPI 后端 — 进化竞技场入口"""
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# 加载 .env 文件（本地开发时生效；Docker 生产环境由 docker-compose 注入）
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    load_dotenv(dotenv_path=_env_path, override=False)  # override=False: 系统环境变量优先
+except ImportError:
+    pass
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,6 +43,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("evotown.main")
+
+from core.auth import admin_token_status  # noqa: E402
 
 
 @asynccontextmanager
@@ -201,6 +213,18 @@ async def lifespan(app: FastAPI):
         await process_mgr.kill(aid)
 
 
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "").strip()
+_cors_origins: list[str] = (
+    [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+    if _cors_origins_raw
+    else ["*"]
+)
+
+logger.info("── Security ──────────────────────────────────────────")
+logger.info("  ADMIN_TOKEN : %s", admin_token_status())
+logger.info("  CORS origins: %s", _cors_origins)
+logger.info("─────────────────────────────────────────────────────")
+
 app = FastAPI(
     title="Evotown",
     description="进化测试实现 — 将进化引擎置于可控环境中做进化效果验证",
@@ -208,10 +232,10 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-Admin-Token"],
 )
 
 app.include_router(agents.router)

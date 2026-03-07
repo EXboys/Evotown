@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useLayoutEffect } from "react";
 import { useReplay } from "../hooks/useReplay";
 import { evotownEvents } from "../phaser/events";
+import { adminFetch } from "../hooks/useAdminToken";
 
 /** 与 TownScene 一致的 agent 颜色（按 agentId 哈希） */
 const AGENT_COLORS = [
@@ -71,9 +72,8 @@ export function ObserverPanel() {
   const [createSoulType, setCreateSoulType] = useState<"conservative" | "aggressive" | "balanced">("balanced");
   const createAgent = async () => {
     try {
-      const res = await fetch("/agents", {
+      const res = await adminFetch("/agents", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_dir: null, soul_type: createSoulType }),
       });
       const data = await res.json();
@@ -91,9 +91,8 @@ export function ObserverPanel() {
     const task = taskInput;
     setTaskInput("");
     try {
-      const res = await fetch("/tasks/inject", {
+      const res = await adminFetch("/tasks/inject", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agent_id: agentId, task }),
       });
       const data = await res.json().catch(() => ({}));
@@ -151,7 +150,7 @@ export function ObserverPanel() {
     if (!window.confirm(`确定要删除 Agent「${displayName}」吗？删除后可从竞技场重新创建。`)) return;
     setDeletingId(agentId);
     try {
-      const res = await fetch(`/agents/${agentId}`, { method: "DELETE" });
+      const res = await adminFetch(`/agents/${agentId}`, { method: "DELETE" });
       if (res.ok) {
         removeAgent(agentId);
         evotownEvents.emit("agent_eliminated", { agent_id: agentId, reason: "user_deleted" });
@@ -178,7 +177,7 @@ export function ObserverPanel() {
       ? selectedAgentId
       : agents[0].id;
     try {
-      const res = await fetch(`/agents/${agentId}/evolve`, { method: "POST" });
+      const res = await adminFetch(`/agents/${agentId}/evolve`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         evotownEvents.emit("sprite_move", {
