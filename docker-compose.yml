@@ -30,12 +30,25 @@ services:
       - SKILLBOX_AUTO_APPROVE=${SKILLBOX_AUTO_APPROVE:-0}
       - SKILLBOX_ALLOW_PLAYWRIGHT=${SKILLBOX_ALLOW_PLAYWRIGHT:-}
       - SKILLBOX_USE_IPC=${SKILLBOX_USE_IPC:-}
-      # 本地模型（Ollama）路由 — 裁判+任务生成使用本地模型
+      # 分通道 provider（DISPATCHER/SOCIAL/JUDGE/CHRONICLE 各自独立 endpoint）
+      # 格式：{CHANNEL}_BASE_URL / {CHANNEL}_API_KEY / {CHANNEL}_MODEL
+      # 未配置时自动 fallback → LOCAL_BASE_URL → 主 BASE_URL
+      - DISPATCHER_BASE_URL=${DISPATCHER_BASE_URL:-}
+      - DISPATCHER_API_KEY=${DISPATCHER_API_KEY:-}
+      - DISPATCHER_MODEL=${DISPATCHER_MODEL:-}
+      - SOCIAL_BASE_URL=${SOCIAL_BASE_URL:-}
+      - SOCIAL_API_KEY=${SOCIAL_API_KEY:-}
+      - SOCIAL_MODEL=${SOCIAL_MODEL:-}
+      - JUDGE_BASE_URL=${JUDGE_BASE_URL:-}
+      - JUDGE_API_KEY=${JUDGE_API_KEY:-}
+      - JUDGE_MODEL=${JUDGE_MODEL:-}
+      - CHRONICLE_BASE_URL=${CHRONICLE_BASE_URL:-}
+      - CHRONICLE_API_KEY=${CHRONICLE_API_KEY:-}
+      - CHRONICLE_MODEL=${CHRONICLE_MODEL:-}
+      # 本地模型（Ollama）路由 — 向后兼容，无通道专属 endpoint 时生效
       # 注意：Docker 内访问宿主机 Ollama 必须用 host.docker.internal，不能用 127.0.0.1
       - LOCAL_BASE_URL=${LOCAL_BASE_URL:-}
       - LOCAL_API_KEY=${LOCAL_API_KEY:-ollama}
-      - JUDGE_MODEL=${JUDGE_MODEL:-}
-      - DISPATCHER_MODEL=${DISPATCHER_MODEL:-}
       # 经济参数（可选覆盖）
       - EVOTOWN_INITIAL_BALANCE=${EVOTOWN_INITIAL_BALANCE:-100}
       - EVOTOWN_REWARD_COMPLETE=${EVOTOWN_REWARD_COMPLETE:-10}
@@ -59,6 +72,8 @@ services:
     # 同时拦截最危险的内核级 syscall（kexec / module load / perf_event 等）。
     # 比 seccomp:unconfined 更安全：默认 ALLOW 但明确 DENY 高危操作。
     # bwrap 内部还会对 skill 子进程施加独立的 seccomp BPF 过滤（见 linux.rs）。
+    cap_add:
+      - SYS_ADMIN          # bwrap 创建 user namespace 所需（mount --make-slave /）
     security_opt:
       - seccomp:./seccomp-bwrap.json
     volumes:
