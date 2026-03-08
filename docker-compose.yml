@@ -87,7 +87,7 @@ services:
       dockerfile: Dockerfile.frontend
     restart: unless-stopped
     ports:
-      - "${PORT:-80}:80"
+      - "${PORT:-8080}:80"
     # 前端产物 + nginx 配置全部内置在 Docker 镜像中，
     # 不再挂载本地文件，docker compose up -d --build 即可更新。
     depends_on:
