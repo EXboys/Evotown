@@ -60,16 +60,20 @@ export function useWebSocket() {
               display_name?: string;
               balance: number;
               in_task: boolean;
+              team_id?: string;
+              team_name?: string;
             }[];
-            // 先更新 store（setAgents 内部会将英文名转为三国中文名）
+            // 先更新 store（setAgents 内部会将英文名转为三国中文名，并保留已有队伍信息）
             store.setAgents(agentList.map((a) => ({
               id: a.agent_id,
               display_name: a.display_name,
               balance: a.balance,
               in_task: a.in_task,
+              team_id: a.team_id,
+              team_name: a.team_name,
             })));
-            // 取 store 中已转换的中文名向 Phaser 同步，而非原始英文 display_name
-            useEvotownStore.getState().agents.forEach((a) => {
+            const agents = useEvotownStore.getState().agents;
+            agents.forEach((a) => {
               evotownEvents.emit("agent_created", {
                 agent_id: a.id,
                 balance: a.balance,
@@ -82,6 +86,17 @@ export function useWebSocket() {
                 reason: "snapshot",
               });
             });
+            // 同步队伍信息到 Phaser
+            const teamsMap: Record<string, { team_id: string; name: string; members: { agent_id: string; display_name: string }[] }> = {};
+            agents.forEach((a) => {
+              if (a.team_id) {
+                if (!teamsMap[a.team_id])
+                  teamsMap[a.team_id] = { team_id: a.team_id, name: a.team_name ?? a.team_id, members: [] };
+                teamsMap[a.team_id].members.push({ agent_id: a.id, display_name: a.display_name ?? a.id });
+              }
+            });
+            const teams = Object.values(teamsMap);
+            if (teams.length > 0) evotownEvents.emit("team_formed", { teams });
           } else if (type === "sprite_move") {
             evotownEvents.emit("sprite_move", {
               agent_id: String(msg.agent_id ?? ""),

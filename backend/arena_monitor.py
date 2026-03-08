@@ -41,7 +41,7 @@ class TaskExecution:
             if is_error:
                 self.tool_failed += 1
         if self.tool_calls and self.tool_calls[-1]["name"] == name:
-            self.tool_calls[-1]["result"] = result[:500]
+            self.tool_calls[-1]["result"] = result  # 完整保留，一字不少
             self.tool_calls[-1]["is_error"] = is_error
 
     def on_text(self, text: str) -> None:

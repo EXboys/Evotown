@@ -22,6 +22,7 @@ from core.callbacks import (
     check_task_timeouts,
     get_idle_agents,
     on_agent_event,
+    on_process_exit,
     on_task_available,
     on_task_done,
     on_task_expired,
@@ -143,6 +144,7 @@ async def lifespan(app: FastAPI):
 
     process_mgr.set_on_task_done(on_task_done)
     process_mgr.set_on_event(on_agent_event)
+    process_mgr.set_on_process_exit(on_process_exit)
     task_dispatcher.configure(
         broadcast_assign_fn=broadcast_preview_and_assign,
         get_idle_agents=get_idle_agents,

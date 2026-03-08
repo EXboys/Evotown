@@ -4,11 +4,13 @@ from typing import Any, Literal, TypedDict
 
 # ── 服务端广播消息（Server → Client）────────────────────────────────────────────
 
-class StateSnapshotAgent(TypedDict):
+class StateSnapshotAgent(TypedDict, total=False):
     agent_id: str
     display_name: str
     balance: int
     in_task: bool
+    team_id: str
+    team_name: str
 
 
 class StateSnapshotMsg(TypedDict):

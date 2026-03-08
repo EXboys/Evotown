@@ -1,7 +1,8 @@
 """监控路由"""
+import time
 from fastapi import APIRouter
 
-from core.deps import experiment_id, monitor
+from core.deps import arena, experiment_id, monitor
 from token_usage import get_usage
 from infra.execution_log import load_all_refusals
 from infra.eliminated_agents import load_eliminated
@@ -50,17 +51,57 @@ async def monitor_stats():
     }
 
 
+def _dedupe_claimed_by_task(records: list[dict]) -> list[dict]:
+    """同一 agent+task 只保留最新记录（完成记录覆盖分配记录）。dropped 单独保留。"""
+    key_to_best: dict[tuple[str, str], dict] = {}
+    dropped_list: list[dict] = []
+    for r in records:
+        if r.get("outcome") == "refused":
+            continue
+        if r.get("outcome") == "dropped":
+            dropped_list.append(r)
+            continue
+        aid = r.get("claimed_by") or r.get("agent_id") or ""
+        task = (r.get("task") or "").strip()
+        if not aid or not task:
+            continue
+        key = (aid, task)
+        ts = r.get("ts", 0)
+        if key not in key_to_best or ts > key_to_best[key].get("ts", 0):
+            key_to_best[key] = r
+    return list(key_to_best.values()) + dropped_list
+
+
 @router.get("/task_history")
 async def get_task_history(
     experiment_id_filter: str | None = None,
     agent_id: str | None = None,
     limit: int = 500,
 ):
-    """任务历史：含认领完成、丢弃、以及每次拒绝记录，按时间排序"""
+    """任务历史：含认领完成、丢弃、以及每次拒绝记录，按时间排序。分配即显示，不等完成。"""
     exp = experiment_id_filter or experiment_id
     claimed_and_dropped = load_task_history(experiment_id=exp, agent_id=agent_id, limit=limit)
+    # 合并进行中任务（arena 中 in_task 的），确保分配后立即可见
+    active_items: list[dict] = []
+    for aid, a in arena.agents.items():
+        if not a.in_task:
+            continue
+        meta = arena.get_pending_task(aid)
+        if not meta:
+            continue
+        task_text = meta.get("task", "") or ""
+        if not task_text:
+            continue
+        active_items.append({
+            "outcome": "claimed",
+            "agent_id": aid,
+            "claimed_by": aid,
+            "task": task_text[:500],
+            "difficulty": meta.get("difficulty", "medium"),
+            "in_progress": True,
+            "ts": time.time(),
+        })
     refusals = load_all_refusals(limit=limit)
-    # 将拒绝记录转为统一格式
     refusal_items = [
         {
             "outcome": "refused",
@@ -72,8 +113,8 @@ async def get_task_history(
         }
         for r in refusals
     ]
-    # 合并并按 ts 排序（claimed/dropped 有 ts，refused 也有 ts）
-    combined = list(claimed_and_dropped) + refusal_items
+    combined = list(claimed_and_dropped) + active_items + refusal_items
+    combined = _dedupe_claimed_by_task([r for r in combined if r.get("outcome") != "refused"]) + refusal_items
     combined.sort(key=lambda x: x.get("ts", 0))
     return combined[-limit:]
 

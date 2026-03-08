@@ -12,6 +12,11 @@ function getAgentColor(agentId: string): string {
   const hash = agentId.split("").reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0);
   return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
 }
+function teamBadgeColor(teamId: string): string {
+  const hash = teamId.split("").reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0);
+  const palette = ["#ef4444", "#3b82f6", "#22c55e", "#f97316", "#8b5cf6", "#eab308"];
+  return palette[Math.abs(hash) % palette.length];
+}
 import { useEvotownStore } from "../store/evotownStore";
 import { TaskInjectorBar } from "./TaskInjectorBar";
 import { EvolutionTimeline } from "./EvolutionTimeline";
@@ -366,6 +371,15 @@ export function ObserverPanel() {
                           className="inline-block w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: getAgentColor(a.id) }}
                         />
+                        {a.team_id && (
+                          <span
+                            title={a.team_name ?? a.team_id}
+                            style={{ backgroundColor: teamBadgeColor(a.team_id) }}
+                            className="shrink-0 inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm text-[8px] font-bold text-white leading-none"
+                          >
+                            {(a.team_name ?? a.team_id).slice(0, 1)}
+                          </span>
+                        )}
                         <span className="truncate min-w-0">
                           {a.display_name ? `${a.display_name}(${a.id})` : a.id}
                         </span>
@@ -389,6 +403,55 @@ export function ObserverPanel() {
                 <p className="text-slate-500 italic text-sm">暂无</p>
               )}
             </div>
+
+            {/* 队伍一览：结阵后按队伍分组展示 */}
+            {(() => {
+              const teams = agents
+                .filter((a) => a.team_id)
+                .reduce<Map<string, { name: string; members: typeof agents }>>((acc, a) => {
+                  const tid = a.team_id!;
+                  if (!acc.has(tid)) acc.set(tid, { name: a.team_name ?? tid, members: [] });
+                  acc.get(tid)!.members.push(a);
+                  return acc;
+                }, new Map());
+              if (teams.size === 0) return null;
+              return (
+                <section className="space-y-2 pt-2 border-t border-slate-700/50">
+                  <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider">队伍</h3>
+                  <div className="space-y-2">
+                    {Array.from(teams.entries()).map(([teamId, { name, members }]) => (
+                      <div key={teamId} className="rounded-lg bg-slate-800/40 border border-slate-600/40 p-2">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span
+                            style={{ backgroundColor: teamBadgeColor(teamId) }}
+                            className="inline-flex w-3 h-3 rounded-sm shrink-0"
+                          />
+                          <span className="text-[11px] font-medium text-slate-300 truncate" title={name}>
+                            {name}
+                          </span>
+                          <span className="text-[10px] text-slate-500">({members.length}人)</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {members.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => {
+                                setSelectedAgent(m.id);
+                                setAgentDetailInitialTab(undefined);
+                              }}
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 hover:bg-slate-600/60 text-slate-300 truncate max-w-[100px]"
+                              title={`${m.display_name ?? m.id} (${m.id})`}
+                            >
+                              {m.display_name ?? m.id}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })()}
           </section>
         )}
 

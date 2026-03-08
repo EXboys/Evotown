@@ -39,7 +39,8 @@ TOOL_TO_BUILDING: dict[str, str] = {
     "memory_list": "记忆仓库",
 }
 from infra.execution_log import append_refusal, count_refusals_by_task
-from infra.task_history import append_task_record
+from infra.task_history import append_partial_task_record, append_task_assigned, append_task_record
+from infra.tool_execution_stream import append_tool_entry
 from judge import judge_task
 from judge import JudgeResult
 
@@ -189,6 +190,25 @@ async def trigger_evolve_background(agent_id: str, agent_home: str) -> None:
 
 def on_agent_event(agent_id: str, event: str, data: dict) -> None:
     monitor.process_event(agent_id, event, data)
+    # 每次 tool_result 立即持久化，一字不少，不管任务完成/失败/超时/崩溃
+    if event == "tool_result":
+        exe = monitor.get_execution(agent_id)
+        if exe and exe.tool_calls:
+            last = exe.tool_calls[-1]
+            meta = arena.get_pending_task(agent_id) or {}
+            task_text = meta.get("task", exe.task) or exe.task or ""
+            task_id = meta.get("task_id", "") or ""
+            name = last.get("name", data.get("name", ""))
+            if name and name not in ("update_task_plan",):
+                append_tool_entry(
+                    agent_id=agent_id,
+                    task_text=task_text,
+                    task_id=task_id,
+                    name=name,
+                    arguments=last.get("arguments", "") or "",
+                    result=last.get("result") or data.get("result", "") or "",
+                    is_error=last.get("is_error", data.get("is_error", False)),
+                )
     # 工具调用时：agent 进入对应建筑（图书馆/工坊/档案馆/记忆仓库）；仅 tool_call 触发，避免与 tool_result 重复
     if event == "tool_call":
         tool_name = (data.get("name") or "").strip()
@@ -293,8 +313,9 @@ def _run_record(
     task_id: str,
     elapsed_ms: int,
     done_data: dict,
+    tool_calls: list | None = None,
 ) -> None:
-    """步骤③：持久化任务历史记录（含难度统计 + 拒绝次数）。"""
+    """步骤③：持久化任务历史记录（含难度统计 + 拒绝次数 + 完整执行明细）。"""
     from core.deps import experiment_id
     arena.record_task_difficulty(agent_id, difficulty)
     refusal_counts = count_refusals_by_task()
@@ -310,6 +331,7 @@ def _run_record(
         success=judge_result.completion >= 5,
         timeout=done_data.get("timeout", False),
         refusal_count=refusal_count,
+        execution_log=tool_calls if tool_calls else None,
     )
     _persist()
 
@@ -536,6 +558,7 @@ async def _handler_record_and_context(event: TaskDoneEvent) -> None:
     _run_record(
         event.agent_id, event.judge_result, event.task_text, event.difficulty,
         event.task_id, event.elapsed_ms, event.done_data,
+        tool_calls=event.tool_calls,
     )
     task_dispatcher.record_outcome(event.judge_result.completion >= 5)
     _update_evolution_context()
@@ -700,6 +723,33 @@ async def check_task_timeouts() -> None:
 
 def get_idle_agents() -> list[str]:
     return arena.get_idle_agent_ids()
+
+
+def on_process_exit(agent_id: str) -> None:
+    """进程异常退出时持久化未完成任务的执行明细，确保全量监控一字不少"""
+    from core.deps import experiment_id
+    if not arena.has_agent(agent_id):
+        return
+    a = arena.get_agent(agent_id)
+    if not a or not a.in_task:
+        return
+    exe = monitor.end_task(agent_id)
+    meta = arena.pop_pending_task(agent_id)
+    if not exe or not exe.tool_calls or not meta:
+        return
+    task_text = meta.get("task", "") or exe.task or ""
+    if not task_text:
+        return
+    append_partial_task_record(
+        experiment_id=experiment_id or "unknown",
+        agent_id=agent_id,
+        task=task_text,
+        difficulty=meta.get("difficulty", "medium"),
+        execution_log=exe.tool_calls,
+        elapsed_ms=exe.elapsed_ms,
+    )
+    arena.set_in_task(agent_id, False)
+    logger.info("[%s] persisted partial execution (%d tool calls) on process exit", agent_id, len(exe.tool_calls))
 
 
 def _trim_system_prompt(prompt: str, max_tokens: int = 2000) -> str:
@@ -967,14 +1017,23 @@ async def _inject_and_dispatch(
     注意：不在此处发送 sprite_move，由 on_task_taken → send_task_dispatched 触发，
     确保 task_taken 先到达前端建立 agent→NPC 映射后再移动 agent。
     """
+    from core.deps import experiment_id
     cfg = _economy()
     context = _build_context_for_agent(agent_id, difficulty)
     ok = await process_mgr.inject_task(agent_id, task, context=context)
     if ok and arena.has_agent(agent_id):
         arena.add_balance(agent_id, cfg["cost_accept"], cfg["initial_balance"])
         arena.set_in_task(agent_id, True)
-        arena.set_pending_task(agent_id, task, difficulty=difficulty, task_id=task_id)
+        tid = task_id if task_id else arena.next_task_id()
+        arena.set_pending_task(agent_id, task, difficulty=difficulty, task_id=tid)
         monitor.begin_task(agent_id, task)
+        append_task_assigned(
+            experiment_id=experiment_id or "unknown",
+            task_id=tid,
+            agent_id=agent_id,
+            task=task,
+            difficulty=difficulty,
+        )
     return ok
 
 

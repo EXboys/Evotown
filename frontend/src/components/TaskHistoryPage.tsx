@@ -10,6 +10,7 @@ type TaskHistoryItem = {
   task: string;
   difficulty: string;
   success?: boolean;
+  in_progress?: boolean;
   elapsed_ms?: number;
   refusal_count?: number;
   refusal_reason?: string;
@@ -17,12 +18,24 @@ type TaskHistoryItem = {
   judge?: JudgeScore;
 };
 
+type ExecutionLogEntry = {
+  name: string;
+  arguments: string;
+  result: string | null;
+  is_error?: boolean;
+};
+
 type TaskDetail = {
   agent_id: string;
   task: string;
   transcript: Array<{ type?: string; role?: string; content?: string; tool_calls?: unknown }>;
   decision?: { total_tools?: number; failed_tools?: number; tools_detail?: string; task_description?: string };
-  task_history?: { judge?: JudgeScore; elapsed_ms?: number; success?: boolean };
+  task_history?: {
+    judge?: JudgeScore;
+    elapsed_ms?: number;
+    success?: boolean;
+    execution_log?: ExecutionLogEntry[];
+  };
 };
 
 const DIFFICULTY_LABELS: Record<string, string> = { easy: "简单", medium: "中等", hard: "困难" };
@@ -47,7 +60,11 @@ export function TaskHistoryPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadHistory(); }, []);
+  useEffect(() => {
+    loadHistory();
+    const id = setInterval(loadHistory, 5_000);  // 5s 轮询，分配即显示
+    return () => clearInterval(id);
+  }, []);
 
   const openDetail = (h: TaskHistoryItem) => {
     const agentId = h.claimed_by ?? h.agent_id;
@@ -98,8 +115,8 @@ export function TaskHistoryPage() {
                   isSelected ? "bg-slate-800" : canClick ? "hover:bg-slate-900/80 cursor-pointer" : ""
                 }`}
               >
-                <span className={`w-5 text-center shrink-0 ${h.success ? "text-emerald-500" : isRefused ? "text-amber-500" : isDropped ? "text-slate-600" : "text-red-500"}`}>
-                  {isRefused ? "⊘" : isDropped ? "—" : h.success ? "✓" : "✗"}
+                <span className={`w-5 text-center shrink-0 ${h.in_progress ? "text-blue-400" : h.success ? "text-emerald-500" : isRefused ? "text-amber-500" : isDropped ? "text-slate-600" : "text-red-500"}`}>
+                  {isRefused ? "⊘" : isDropped ? "—" : h.in_progress ? "…" : h.success ? "✓" : "✗"}
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-slate-300 truncate" title={h.task}>{h.task}</p>
@@ -147,6 +164,7 @@ function TaskDetailPanel({ detail, agentNameMap }: { detail: TaskDetail; agentNa
   const toolsDetail = detail.decision?.tools_detail
     ? (() => { try { return JSON.parse(detail.decision!.tools_detail!) as { tool?: string; success?: boolean }[]; } catch { return []; } })()
     : [];
+  const executionLog = detail.task_history?.execution_log ?? [];
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -183,8 +201,39 @@ function TaskDetailPanel({ detail, agentNameMap }: { detail: TaskDetail; agentNa
         </div>
       )}
 
-      {/* Tool Calls */}
-      {toolsDetail.length > 0 && (
+      {/* 执行明细：完整工具调用（参数 + 结果，一字不少） */}
+      {executionLog.length > 0 && (
+        <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 p-4 space-y-4">
+          <h3 className="text-sm font-medium text-slate-300">执行明细 ({executionLog.length} 次)</h3>
+          <div className="space-y-4">
+            {executionLog.map((entry, j) => (
+              <div key={j} className="rounded-lg border border-slate-700/50 overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/50">
+                  <span className={`w-6 h-6 rounded flex items-center justify-center text-xs shrink-0 ${
+                    !entry.is_error ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                  }`}>
+                    {entry.is_error ? "✗" : "✓"}
+                  </span>
+                  <span className="font-mono font-semibold text-slate-200">{entry.name}</span>
+                </div>
+                <div className="p-3 space-y-2 text-xs">
+                  <div>
+                    <span className="text-slate-500 block mb-1">参数 (arguments) — 完整原文</span>
+                    <pre className="whitespace-pre-wrap break-words text-slate-300 font-mono bg-slate-900/50 p-2 rounded overflow-x-auto">{entry.arguments || "(空)"}</pre>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block mb-1">结果 (result) — 完整原文</span>
+                    <pre className={`whitespace-pre-wrap break-words font-mono bg-slate-900/50 p-2 rounded overflow-x-auto ${entry.is_error ? "text-red-400" : "text-slate-300"}`}>{entry.result ?? "(空)"}</pre>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 工具调用摘要（无 execution_log 时使用 decisions 的 tools_detail） */}
+      {executionLog.length === 0 && toolsDetail.length > 0 && (
         <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 p-4 space-y-3">
           <h3 className="text-sm font-medium text-slate-300">工具调用 ({toolsDetail.length})</h3>
           <ul className="space-y-1.5 font-mono text-xs">
@@ -202,9 +251,9 @@ function TaskDetailPanel({ detail, agentNameMap }: { detail: TaskDetail; agentNa
         </div>
       )}
 
-      {/* Transcript */}
+      {/* Transcript：用户 + 助手对话（完整原文） */}
       <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 p-4 space-y-3">
-        <h3 className="text-sm font-medium text-slate-300">执行日志 (Transcript)</h3>
+        <h3 className="text-sm font-medium text-slate-300">对话记录 (Transcript)</h3>
         {detail.transcript.length === 0 ? (
           <p className="text-xs text-slate-500 italic">无 transcript 记录</p>
         ) : (
@@ -242,6 +291,14 @@ function TaskDetailPanel({ detail, agentNameMap }: { detail: TaskDetail; agentNa
             })}
           </div>
         )}
+      </div>
+
+      {/* 原始全量数据：一字不少，无总结 */}
+      <div className="rounded-xl bg-slate-900/60 border border-slate-700/50 p-4 space-y-3">
+        <h3 className="text-sm font-medium text-slate-300">原始全量数据 (Raw JSON)</h3>
+        <pre className="whitespace-pre-wrap break-words text-[10px] font-mono text-slate-400 bg-slate-950 p-3 rounded overflow-x-auto">
+          {JSON.stringify(detail, null, 2)}
+        </pre>
       </div>
     </div>
   );

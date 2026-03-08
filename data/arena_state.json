@@ -1,12 +1,12 @@
 {
   "agent_counter": 13,
   "task_counter": 163,
-  "global_task_counter": 15,
+  "global_task_counter": 42,
   "agents": [
     {
       "id": "agent_10",
       "display_name": "司马仲达",
-      "balance": 10,
+      "balance": 20,
       "status": "active",
       "soul_type": "balanced",
       "team_id": "0505d288",
@@ -14,25 +14,25 @@
       "rescue_received": 0,
       "solo_preference": false,
       "evolution_focus": "",
-      "loyalty": 89
+      "loyalty": 80
     },
     {
       "id": "agent_11",
       "display_name": "关云长",
-      "balance": 15,
+      "balance": 18,
       "status": "active",
       "soul_type": "balanced",
-      "team_id": "ff6623c5",
+      "team_id": "c281bd05",
       "rescue_given": 0,
       "rescue_received": 0,
       "solo_preference": false,
       "evolution_focus": "",
-      "loyalty": 44
+      "loyalty": 24
     },
     {
       "id": "agent_12",
       "display_name": "周公瑾",
-      "balance": 36,
+      "balance": 14,
       "status": "active",
       "soul_type": "balanced",
       "team_id": "0505d288",
@@ -40,20 +40,20 @@
       "rescue_received": 0,
       "solo_preference": false,
       "evolution_focus": "",
-      "loyalty": 76
+      "loyalty": 46
     },
     {
       "id": "agent_13",
       "display_name": "诸葛孔明",
-      "balance": 18,
+      "balance": 15,
       "status": "active",
       "soul_type": "balanced",
-      "team_id": "ff6623c5",
+      "team_id": "c281bd05",
       "rescue_given": 0,
       "rescue_received": 0,
       "solo_preference": false,
       "evolution_focus": "",
-      "loyalty": 84
+      "loyalty": 70
     }
   ],
   "teams": [
@@ -65,25 +65,44 @@
         "agent_12"
       ],
       "shared_skills": [
-        "agent_browser"
+        "agent_browser",
+        "run_command",
+        "http_request",
+        "write_file",
+        "write_output"
       ],
       "shared_wisdom": [
-        "察敌贵精准，勿滥施探马。虽得实情，然屡召工具，徒耗心神。谋定后动，一击必中，勿以繁术累身，精简乃胜。"
+        "察敌贵精准，勿滥施探马。虽得实情，然屡召工具，徒耗心神。谋定后动，一击必中，勿以繁术累身，精简乃胜。",
+        "蜀道艰险，里程必察。行军之日关乎粮草成败。知远近则进退有据，算迟速则劳逸得宜。谋定后动，方克强敌。",
+        "运筹帷幄之道，贵在精算无遗。数虽微渺，位必详验。善假利器，查微知著。虚实既明，方可决胜千里。",
+        "布阵如整伍，贵在循序相邻。错位则易，往复推演。乱终成序，治军亦然。耐心为要，不可躁进，方得整肃。",
+        "历观战史年序，知兴衰有时。善战者隐忍待机，不争朝夕之利，待敌露隙，后发制人，此乃全胜之道。"
       ],
       "creed": "",
       "created_at": "2026-03-08T03:19:38.977589+00:00"
     },
     {
-      "team_id": "ff6623c5",
-      "name": "荆州义军",
+      "team_id": "c281bd05",
+      "name": "汉室遗风",
       "members": [
-        "agent_13",
-        "agent_11"
+        "agent_11",
+        "agent_13"
       ],
-      "shared_skills": [],
-      "shared_wisdom": [],
+      "shared_skills": [
+        "run_command",
+        "memory_search",
+        "http_request",
+        "calculator",
+        "write_file"
+      ],
+      "shared_wisdom": [
+        "月径尚可精测，敌势岂容模糊？战必先算虚实，毫厘不差，方能青龙偃月，一刀定乾坤。",
+        "曹军数倍于我，然赤壁终败于火。兵数非决胜之本，查敌乃寻破绽。知彼知己，顺势用谋，方以少胜多。",
+        "兵家胜负，系于粮秣。官渡胜在断敌辎重，推演知之，消耗悬殊胜负定。察敌虚实，算尽粮草，必可制胜。",
+        "观孔明北伐，知成败之数。知己知彼，谋定后动。吾辈忠义同心，精研战术，则无往不胜。"
+      ],
       "creed": "",
-      "created_at": "2026-03-08T03:19:38.977602+00:00"
+      "created_at": "2026-03-08T11:59:06.563530+00:00"
     }
   ],
   "experiment_id": "exp_692eae4c3c61"

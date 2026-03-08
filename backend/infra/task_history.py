@@ -42,6 +42,33 @@ def _migrate_from_legacy() -> None:
         logger.warning("Legacy task_history migration failed: %s", e)
 
 
+def append_task_assigned(
+    experiment_id: str,
+    task_id: str,
+    agent_id: str,
+    task: str,
+    difficulty: str = "medium",
+) -> None:
+    """任务分配时立即写入，使任务列表即时显示（不等完成）"""
+    record = {
+        "experiment_id": experiment_id,
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "claimed_by": agent_id,
+        "task": task[:500],
+        "difficulty": difficulty,
+        "outcome": "claimed",
+        "in_progress": True,
+        "ts": time.time(),
+    }
+    try:
+        _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_HISTORY_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.warning("Failed to append task assigned: %s", e)
+
+
 def append_task_record(
     experiment_id: str,
     task_id: str,
@@ -53,8 +80,10 @@ def append_task_record(
     success: bool,
     timeout: bool = False,
     refusal_count: int = 0,
+    execution_log: list[dict[str, Any]] | None = None,
 ) -> None:
-    """追加一条任务完成记录（JSONL 格式）。claimed_by=认领者，refusal_count=认领前被拒绝次数"""
+    """追加一条任务完成记录（JSONL 格式）。claimed_by=认领者，refusal_count=认领前被拒绝次数。
+    execution_log: 完整工具调用明细 [{name, arguments, result, is_error}, ...]，一字不少。"""
     record = {
         "experiment_id": experiment_id,
         "task_id": task_id,
@@ -70,6 +99,8 @@ def append_task_record(
         "refusal_count": refusal_count,
         "ts": time.time(),
     }
+    if execution_log is not None:
+        record["execution_log"] = execution_log
     try:
         _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(_HISTORY_PATH, "a", encoding="utf-8") as f:
@@ -164,6 +195,39 @@ def compute_stats_from_history(
         "avg_quality": round(sum(qualities) / max(len(qualities), 1), 1),
         "avg_efficiency": round(sum(efficiencies) / max(len(efficiencies), 1), 1),
     }
+
+
+def append_partial_task_record(
+    experiment_id: str,
+    agent_id: str,
+    task: str,
+    difficulty: str = "medium",
+    execution_log: list[dict[str, Any]] | None = None,
+    elapsed_ms: float = 0,
+) -> None:
+    """持久化未完成任务的执行明细（崩溃/超时/强制终止等），确保全量监控一字不少"""
+    record = {
+        "experiment_id": experiment_id,
+        "task_id": "",
+        "agent_id": agent_id,
+        "claimed_by": agent_id,
+        "task": task[:500],
+        "difficulty": difficulty,
+        "outcome": "claimed",
+        "judge": {"completion": 0, "quality": 0, "efficiency": 0, "reason": "任务未完成（崩溃/超时）", "reward": -2},
+        "elapsed_ms": round(elapsed_ms),
+        "success": False,
+        "timeout": False,
+        "refusal_count": 0,
+        "ts": time.time(),
+        "execution_log": execution_log or [],
+    }
+    try:
+        _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_HISTORY_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.warning("Failed to append partial task record: %s", e)
 
 
 def append_task_dropped(

@@ -107,3 +107,9 @@
 {"ts": 1772958126.875641, "agent_id": "agent_13", "task": "搜索Python最新版本并写Hello World", "difficulty": "medium", "status": "refused", "refusal_reason": ""}
 {"ts": 1772958361.192935, "agent_id": "agent_13", "task": "搜索并保存一段文本到文件再读回", "difficulty": "medium", "status": "refused", "refusal_reason": ""}
 {"ts": 1772958361.195773, "agent_id": "agent_10", "task": "搜索并保存一段文本到文件再读回", "difficulty": "medium", "status": "refused", "refusal_reason": ""}
+{"ts": 1772964929.7511559, "agent_id": "agent_11", "task": "搜索三国名将寿命并计算平均年龄", "difficulty": "medium", "status": "refused", "refusal_reason": ""}
+{"ts": 1772971568.3797069, "agent_id": "agent_10", "task": "搜索前10大国GDP并找出中位数", "difficulty": "hard", "status": "refused", "refusal_reason": ""}
+{"ts": 1772971568.3823218, "agent_id": "agent_11", "task": "搜索前10大国GDP并找出中位数", "difficulty": "hard", "status": "refused", "refusal_reason": ""}
+{"ts": 1772972527.1702988, "agent_id": "agent_13", "task": "用代码求1到50的素数个数", "difficulty": "medium", "status": "refused", "refusal_reason": ""}
+{"ts": 1772972527.173446, "agent_id": "agent_12", "task": "用代码求1到50的素数个数", "difficulty": "medium", "status": "refused", "refusal_reason": ""}
+{"ts": 1772972527.17412, "agent_id": "agent_10", "task": "用代码求1到50的素数个数", "difficulty": "medium", "status": "refused", "refusal_reason": ""}

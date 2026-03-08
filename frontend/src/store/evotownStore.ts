@@ -185,22 +185,28 @@ export const useEvotownStore = create<EvotownState>((set, get) => ({
         ),
       };
     }),
-  setAgents: (agents) => {
-    // 批量分配：始终用三国武将名覆盖后端英文名，逐个去重
-    const usedNames = new Set<string>();
-    const result = agents.map((a) => {
-      // 已经是三国武将名（包含中文）则保留，否则强制分配
-      const isChinese = a.display_name && /[\u4e00-\u9fff]/.test(a.display_name);
-      if (isChinese && !usedNames.has(a.display_name!)) {
-        usedNames.add(a.display_name!);
-        return a;
-      }
-      const name = autoWarriorName(a.id, usedNames);
-      usedNames.add(name);
-      return { ...a, display_name: name };
-    });
-    set({ agents: result });
-  },
+  setAgents: (agents) =>
+    set((s) => {
+      // 保留旧 state 中的队伍信息（API 可能不返回 team_id）
+      const oldTeamMap = Object.fromEntries(
+        s.agents.filter((a) => a.team_id).map((a) => [a.id, { team_id: a.team_id!, team_name: a.team_name }])
+      );
+      const usedNames = new Set<string>();
+      const result = agents.map((a) => {
+        const withTeam = oldTeamMap[a.id] && !a.team_id
+          ? { ...a, team_id: oldTeamMap[a.id].team_id, team_name: oldTeamMap[a.id].team_name }
+          : a;
+        const isChinese = withTeam.display_name && /[\u4e00-\u9fff]/.test(withTeam.display_name);
+        if (isChinese && !usedNames.has(withTeam.display_name!)) {
+          usedNames.add(withTeam.display_name!);
+          return withTeam;
+        }
+        const name = autoWarriorName(withTeam.id, usedNames);
+        usedNames.add(name);
+        return { ...withTeam, display_name: name };
+      });
+      return { agents: result };
+    }),
   addAgent: (agent) =>
     set((s) => {
       const usedNames = new Set(s.agents.map((a) => a.display_name).filter(Boolean) as string[]);

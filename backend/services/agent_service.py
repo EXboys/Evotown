@@ -10,6 +10,7 @@ from domain.models import AgentCreate, AgentInfo
 from log_watcher import start_watching
 from infra.execution_log import load_refusals
 from infra.task_history import load_task_history
+from infra.tool_execution_stream import load_execution_log_for_task
 from sqlite_reader import (
     get_transcript_executions,
     get_transcript_excerpt_for_task,
@@ -33,6 +34,10 @@ async def list_agents() -> list[AgentInfo]:
             chat_root=rec.chat_dir,
             experiment_id=exp_id or None,
         )
+        team_name = None
+        if rec.team_id:
+            team = arena.get_team(rec.team_id)
+            team_name = team.name if team else None
         result.append(AgentInfo(
             id=rec.agent_id,
             display_name=rec.display_name or rec.agent_id,
@@ -45,6 +50,8 @@ async def list_agents() -> list[AgentInfo]:
             success_count=stats["success_count"],
             evolution_count=stats["evolution_count"],
             evolution_success_count=stats["evolution_success_count"],
+            team_id=rec.team_id,
+            team_name=team_name,
         ))
     return result
 
@@ -288,33 +295,48 @@ async def repair_skills_action(agent_id: str) -> tuple[bool, str]:
 async def get_task_execution_detail(
     agent_id: str, task_text: str, ts_hint: float | None = None
 ) -> dict | None:
-    """获取某任务的执行详情：transcript 片段 + decision（工具明细）+ task_history（judge）"""
-    a = arena.get_agent(agent_id)
-    if not a:
-        return None
-
-    chat_root = a.chat_dir
-    transcript_entries = await asyncio.to_thread(
-        get_transcript_excerpt_for_task, chat_root, agent_id, task_text, ts_hint
-    )
-
-    decisions = await get_decisions(chat_root, limit=100)
+    """获取某任务的执行详情：transcript + decision + task_history（含完整 execution_log）"""
+    transcript_entries = []
     decision = None
-    for d in decisions:
-        desc = (d.get("task_description") or "").strip()
-        if desc and (desc == task_text or task_text in desc):
-            decision = d
-            break
 
-    task_history = await asyncio.to_thread(
+    a = arena.get_agent(agent_id)
+    if a:
+        chat_root = a.chat_dir
+        transcript_entries = await asyncio.to_thread(
+            get_transcript_excerpt_for_task, chat_root, agent_id, task_text, ts_hint
+        )
+        decisions = await get_decisions(chat_root, limit=100)
+        for d in decisions:
+            desc = (d.get("task_description") or "").strip()
+            if desc and (desc == task_text or task_text in desc):
+                decision = d
+                break
+
+    task_history_rows = await asyncio.to_thread(
         load_task_history, None, agent_id, limit=100
     )
     th_record = None
-    for h in task_history:
+    for h in task_history_rows:
         t = (h.get("task") or "").strip()
         if t and (t == task_text or task_text in t):
             th_record = h
             break
+
+    # 执行明细：优先 task_history.execution_log，否则从增量流加载（覆盖崩溃/超时等未完成场景）
+    execution_log = None
+    task_id_hint = (th_record or {}).get("task_id", "") or ""
+    if th_record and th_record.get("execution_log"):
+        execution_log = th_record["execution_log"]
+    else:
+        execution_log = await asyncio.to_thread(
+            load_execution_log_for_task, agent_id, task_text, task_id_hint or None, 10000
+        )
+    if execution_log is not None:
+        if th_record is not None:
+            th_record = dict(th_record)
+        else:
+            th_record = {}
+        th_record["execution_log"] = execution_log
 
     return {
         "agent_id": agent_id,

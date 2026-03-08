@@ -252,6 +252,7 @@ type TaskHistoryItem = {
   task: string;
   difficulty: string;
   success?: boolean;
+  in_progress?: boolean;
   elapsed_ms?: number;
   refusal_count?: number;
   refusal_reason?: string;
@@ -278,7 +279,7 @@ function TaskHistorySection() {
 
   useEffect(() => {
     loadHistory();
-    const id = setInterval(loadHistory, 30_000);
+    const id = setInterval(loadHistory, 5_000);  // 5s 轮询，分配即显示
     return () => clearInterval(id);
   }, []);
 
@@ -343,7 +344,7 @@ function TaskHistorySection() {
                 ) : (
                   <>
                     {claimant && <span className="text-slate-500 font-mono shrink-0 truncate max-w-[80px]" title={claimant}>{agentNameMap[claimant] || claimant}</span>}
-                    <span className={`shrink-0 ${h.success ? "text-emerald-500" : "text-red-500"}`}>{h.success ? "✓" : "✗"}</span>
+                    <span className={`shrink-0 ${h.in_progress ? "text-blue-400" : h.success ? "text-emerald-500" : "text-red-500"}`}>{h.in_progress ? "…" : h.success ? "✓" : "✗"}</span>
                     {h.refusal_count != null && h.refusal_count > 0 && (
                       <span className="text-slate-600 shrink-0" title="认领前被拒次数">拒{h.refusal_count}</span>
                     )}

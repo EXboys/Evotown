@@ -39,9 +39,8 @@ interface AgentState {
   eliminating: boolean;
   /** 救援状态：施救中暂存原目标，救援完成后恢复 */
   rescueTarget?: { x: number; y: number };
-  /** 队伍旗帜（小色块，显示在脚底） */
-  teamFlag?: Phaser.GameObjects.Graphics;
   teamId?: string;
+  teamName?: string;
 }
 
 export default class TownScene extends Phaser.Scene {
@@ -65,6 +64,8 @@ export default class TownScene extends Phaser.Scene {
   private subtitlePlaying = false;
   private subtitleContainer!: Phaser.GameObjects.Container;
   private subtitleText!: Phaser.GameObjects.Text;
+  /** 上次 team_formed 的 teams 指纹，用于去重：同步/轮询时无变更不弹气泡 */
+  private lastTeamFormedFingerprint = "";
 
   constructor() {
     super({ key: "TownScene" });
@@ -390,42 +391,34 @@ export default class TownScene extends Phaser.Scene {
     tasks.forEach((t) => this.taskNpcManager.spawnForTask(t.task_id));
   }
 
-  /** 生成标签文本：主游戏界面只显示 agent_name */
-  private agentLabel(displayName: string, _agentId: string): string {
+  /** 生成标签文本：名字 + 队伍标识（有队伍时显示 队名·名字） */
+  private agentLabel(displayName: string, _agentId: string, teamName?: string): string {
+    if (teamName && teamName.trim()) {
+      const short = teamName.length > 2 ? teamName.slice(0, 2) : teamName;
+      return `${short}·${displayName}`;
+    }
     return displayName;
   }
 
-  /** 将 team_id 哈希映射到阵营颜色（与 Leaderboard/SocialGraph 一致） */
-  private teamHexColor(teamId: string): number {
-    const hash = teamId.split("").reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0);
-    const palette = [0xef4444, 0x3b82f6, 0x22c55e, 0xf97316, 0x8b5cf6, 0xeab308];
-    return palette[Math.abs(hash) % palette.length];
-  }
-
-  /** 结阵事件：为每个 agent 添加/更新队伍彩色旗帜 */
+  /** 结阵事件：更新标签队伍标识（队名·名字）。仅当队伍结构有变更时显示气泡，避免同步/轮询时重复弹出 */
   private onTeamFormed(data: { teams: { team_id: string; name: string; members: { agent_id: string; display_name: string }[] }[] }) {
     data.teams.forEach((team) => {
-      const color = this.teamHexColor(team.team_id);
       team.members.forEach((m) => {
         const agent = this.agents.get(m.agent_id);
         if (!agent) return;
         agent.teamId = team.team_id;
-        // 若旗帜已存在则更新颜色，否则创建新的
-        if (agent.teamFlag) {
-          agent.teamFlag.clear();
-        } else {
-          const flag = this.add.graphics();
-          // 旗帜固定在角色脚底下方（容器局部坐标：y = +14, 宽6高4）
-          agent.container.add(flag);
-          agent.teamFlag = flag;
-        }
-        const flag = agent.teamFlag!;
-        flag.fillStyle(color, 1);
-        flag.fillRect(-3, 14, 6, 4);
-        flag.lineStyle(1, 0x000000, 0.6);
-        flag.strokeRect(-3, 14, 6, 4);
+        agent.teamName = team.name;
+        agent.label.setText(this.agentLabel(agent.displayName, m.agent_id, team.name));
       });
     });
+
+    // 指纹：仅当队伍结构变化时显示气泡（同步/轮询无变更不弹）
+    const fingerprint = data.teams
+      .map((t) => `${t.team_id}:${t.members.map((m) => m.agent_id).sort().join(",")}`)
+      .sort()
+      .join("|");
+    if (fingerprint === this.lastTeamFormedFingerprint) return;
+    this.lastTeamFormedFingerprint = fingerprint;
 
     // 结阵气泡提示（在城池中心位置）
     const cx = this.scale.width / 2;
@@ -862,6 +855,10 @@ export default class TownScene extends Phaser.Scene {
       });
 
       // 精灵闪橙色后冲向地图中央（象征奔向新阵营）
+      agent.teamId = data.new_team_id || undefined;
+      agent.teamName = data.new_team_name || undefined;
+      agent.label.setText(this.agentLabel(agent.displayName, data.agent_id, data.new_team_name));
+
       this.tweens.add({
         targets: agent.container,
         alpha: 0.15, duration: 120, yoyo: true, repeat: 4, ease: "Linear",

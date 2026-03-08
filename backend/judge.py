@@ -17,11 +17,11 @@ from llm_client import judge_completion
 
 logger = logging.getLogger("evotown.judge")
 
-# 常见 LLM 返回的前缀（Gemini 等可能带说明文字）
+# 常见 LLM 返回的前缀（Gemini 等可能带说明文字，含冒号后无内容的情况）
 _JSON_PREFIX_PATTERN = re.compile(
     r"^(?:Here is the JSON requested|Here is the JSON|Here's the JSON|"
     r"The JSON (?:is|requested)|JSON (?:output|response):?|"
-    r"Sure,? here(?:'s| is) the JSON:?)\s*\n*",
+    r"Sure,? here(?:'s| is) the JSON:?)\s*:?\s*\n*",
     re.IGNORECASE,
 )
 # Gemini 等可能返回 "Here is the JSON requested:\n```json\n{...}"
@@ -262,7 +262,15 @@ async def judge_task(
             logger.warning("Judge LLM returned non-JSON (attempt %d), raw=%s", attempt + 1, raw[:400])
             if attempt == 0:
                 continue
-            result = {"completion": 0, "quality": 0, "efficiency": 0, "reason": ""}
+            # 解析失败时：基于工具成功率给 fallback 分数，避免任务完成却被判 0 分
+            success_rate = (tool_total - tool_failed) / max(tool_total, 1)
+            fallback_score = min(10, max(5, int(success_rate * 8))) if tool_total > 0 else 6
+            result = {
+                "completion": fallback_score,
+                "quality": fallback_score,
+                "efficiency": fallback_score,
+                "reason": f"Judge parse failed, fallback score from {success_rate:.0%} tool success.",
+            }
         return JudgeResult(
             completion=int(result.get("completion", 0)),
             quality=int(result.get("quality", 0)),

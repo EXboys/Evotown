@@ -238,6 +238,15 @@ class ArenaState:
         counts = self._agent_difficulty_count.setdefault(agent_id, {"easy": 0, "medium": 0, "hard": 0})
         counts[difficulty] = counts.get(difficulty, 0) + 1
 
+    def get_pending_task(self, agent_id: str) -> PendingTaskMeta | None:
+        """获取当前任务元数据（不弹出），用于增量持久化执行流"""
+        meta = self._pending_tasks.get(agent_id)
+        if meta and isinstance(meta, dict):
+            return meta
+        if isinstance(meta, str):
+            return {"task": meta, "difficulty": "medium", "task_id": ""}
+        return None
+
     def pop_pending_task(self, agent_id: str) -> PendingTaskMeta | None:
         meta = self._pending_tasks.pop(agent_id, None)
         if meta and isinstance(meta, dict):

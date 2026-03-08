@@ -20,6 +20,8 @@ class AgentInfo(BaseModel):
     success_count: int = 0
     evolution_count: int = 0
     evolution_success_count: int = 0
+    team_id: str | None = None
+    team_name: str | None = None
 
 
 class TaskInject(BaseModel):

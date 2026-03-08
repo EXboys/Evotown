@@ -132,6 +132,7 @@ class ProcessManager:
         self._arena_root = Path.home() / ".skilllite" / "arena"
         self._on_task_done: Optional[Callable[[str, bool, dict], Awaitable[None]]] = None
         self._on_event: Optional[Callable[[str, str, dict], None]] = None
+        self._on_process_exit: Optional[Callable[[str], None]] = None
         # per-agent tool call tracking for task completion validation
         self._tool_stats: dict[str, dict[str, int]] = {}
         # ── P2-9: 单任务步骤上限 ─────────────────────────────────────────────
@@ -162,6 +163,10 @@ class ProcessManager:
     def set_on_event(self, cb: Callable[[str, str, dict], None]) -> None:
         """设置事件回调：on_event(agent_id, event, data) — 供监控模块使用"""
         self._on_event = cb
+
+    def set_on_process_exit(self, cb: Callable[[str], None]) -> None:
+        """进程异常退出时回调，用于持久化未完成任务的执行明细"""
+        self._on_process_exit = cb
 
     def _agent_home(self, agent_id: str, custom_dir: Optional[str] = None) -> Path:
         """Agent 的 HOME 目录（用于 subprocess env）"""
@@ -386,6 +391,13 @@ class ProcessManager:
                 except json.JSONDecodeError:
                     logger.warning("[%s][stdout] non-JSON line: %s", agent_id, decoded[:200])
 
+            # ── 进程退出：持久化未完成任务的执行明细（全量监控） ─────────────────
+            if eof_received and self._on_process_exit:
+                try:
+                    self._on_process_exit(agent_id)
+                except Exception as exc:
+                    logger.warning("[%s] on_process_exit failed: %s", agent_id, exc)
+
             # ── 自动重启（指数退避 / 计划软重启快速路径） ──────────────────────
             # 仅在 EOF 触发（非 kill() / CancelledError），且 agent 仍在 respawn 注册表中
             if eof_received and agent_id in self._respawn_soul_types:
@@ -528,7 +540,11 @@ class ProcessManager:
             "message": preview_msg,
             "session_key": agent_id,
             "skill_dirs": skill_dirs,
-            "config": {"workspace": agent_home, "soul_path": soul_path_str},
+            "config": {
+                "workspace": agent_home,
+                "soul_path": soul_path_str,
+                "skip_history_for_planning": True,
+            },
         }
         if context and context.get("append"):
             params["context"] = {"append": context["append"]}
@@ -612,7 +628,8 @@ class ProcessManager:
                 "skill_dirs": skill_dirs,
                 "config": {
                     "workspace": agent_home,
-                    "soul_path": soul_path_str,  # 显式指定 agent 根目录 SOUL.md
+                    "soul_path": soul_path_str,
+                    "skip_history_for_planning": True,
                 },
             }
             if context and context.get("append"):

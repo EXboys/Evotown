@@ -30,6 +30,8 @@ async function fetchAgents(): Promise<AgentInfo[]> {
     chat_dir: a.chat_dir,
     status: a.status,
     soul_type: a.soul_type,
+    team_id: a.team_id,
+    team_name: a.team_name,
   }));
 }
 
@@ -44,6 +46,17 @@ function syncStoreToPhaser(agents: AgentInfo[]) {
       reason: "sync",
     });
   });
+  // 同步队伍信息：store 中有 team_id 时，emit team_formed 让 Phaser 显示旗帜和标签
+  const teamsMap: Record<string, { team_id: string; name: string; members: { agent_id: string; display_name: string }[] }> = {};
+  agents.forEach((a) => {
+    if (a.team_id) {
+      if (!teamsMap[a.team_id])
+        teamsMap[a.team_id] = { team_id: a.team_id, name: a.team_name ?? a.team_id, members: [] };
+      teamsMap[a.team_id].members.push({ agent_id: a.id, display_name: a.display_name ?? a.id });
+    }
+  });
+  const teams = Object.values(teamsMap);
+  if (teams.length > 0) evotownEvents.emit("team_formed", { teams });
 }
 
 /** 完整同步：fetch → 更新 store → 同步到 Phaser */
@@ -105,11 +118,11 @@ export function useAgentSync() {
     return () => evotownEvents.off("request_sync", handler);
   }, [setAgents]);
 
-  // 4. agents 变化时同步到 Phaser（兜底：store 有数据但 Phaser 可能刚就绪）
+  // 4. agents 变化时同步到 Phaser（兜底：store 有数据但 Phaser 可能刚就绪，含队伍变化）
   useEffect(() => {
     if (agents.length > 0)
       syncFromStoreToPhaser(() => useEvotownStore.getState().agents);
-  }, [agents.length, agents.map((a) => a.id).join(",")]);
+  }, [agents.length, agents.map((a) => `${a.id}:${a.team_id ?? ""}`).join(",")]);
 
   // 5. 15s 兜底轮询（WS 未连接或时序异常时）
   useEffect(() => {
