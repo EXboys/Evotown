@@ -539,3 +539,29 @@
 {"type": "state_snapshot", "agents": [{"agent_id": "agent_10", "display_name": "司马仲达", "balance": 6, "in_task": false}, {"agent_id": "agent_11", "display_name": "关云长", "balance": 18, "in_task": false}, {"agent_id": "agent_12", "display_name": "周公瑾", "balance": 10, "in_task": false}, {"agent_id": "agent_13", "display_name": "诸葛孔明", "balance": 14, "in_task": false}], "replay_ts": 0.015}
 {"type": "chronicle_published", "chapter": 1, "chapter_label": "第一回", "virtual_date": "建安元年正月", "title": "军师暂歇擂台无争 深谋远虑无声惊雷", "preview": "话说孔明进化小镇，自开辟以来，便是一处智慧较量、军功争夺的演化之地。镇中谋士皆非凡人，各自怀抱绝学，于孔明军师所设擂台上领命征战，切磋智勇，积累军功，优胜劣汰，循环往复。是岁建安元年正月，时值新春，寒意渐褪，万物方始萌动。按例，擂台之上应是鼓角争鸣，军令频传，然而当期却一反常态，不见烽火，不闻战鼓。北风虽寒，却吹不散镇中那股沉寂而又蓄势待发的氛围。细察当期战报，军令总数竟为零，告捷者无，兵败者亦无", "replay_ts": 318.711}
 {"type": "state_snapshot", "agents": [{"agent_id": "agent_10", "display_name": "司马仲达", "balance": 6, "in_task": false}, {"agent_id": "agent_11", "display_name": "关云长", "balance": 18, "in_task": false}, {"agent_id": "agent_12", "display_name": "周公瑾", "balance": 10, "in_task": false}, {"agent_id": "agent_13", "display_name": "诸葛孔明", "balance": 14, "in_task": false}], "replay_ts": 0.01}
+{"type": "state_snapshot", "agents": [{"agent_id": "agent_10", "display_name": "司马仲达", "balance": 6, "in_task": false}, {"agent_id": "agent_11", "display_name": "关云长", "balance": 18, "in_task": false}, {"agent_id": "agent_12", "display_name": "周公瑾", "balance": 10, "in_task": false}, {"agent_id": "agent_13", "display_name": "诸葛孔明", "balance": 14, "in_task": false}], "replay_ts": 0.013}
+{"type": "task_available", "task_id": "t_1", "task": "用代码实现冒泡排序并测试", "difficulty": "hard", "created_at": "1772980860.3798552", "replay_ts": 1056.84}
+{"type": "task_taken", "task_id": "t_1", "agent_id": "agent_13", "task": "用代码实现冒泡排序并测试", "replay_ts": 1089.339}
+{"type": "task_dispatched", "agent_id": "agent_13", "task": "用代码实现冒泡排序并测试", "replay_ts": 1089.339}
+{"type": "sprite_move", "agent_id": "agent_12", "from": "广场", "to": "档案馆", "reason": "tool_write_file", "replay_ts": 1103.41}
+{"type": "task_available", "task_id": "t_2", "task": "比较曹魏/蜀汉/东吴疆域面积", "difficulty": "hard", "created_at": "1772980922.882271", "replay_ts": 1119.342}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "档案馆", "reason": "tool_write_file", "replay_ts": 1133.089}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1134.834}
+{"type": "task_complete", "agent_id": "agent_13", "success": true, "balance": 14, "judge": {"completion": 10, "quality": 10, "efficiency": 10, "reason": "响应完全满足任务要求，代码实现正确且通过了测试。", "skipped": false, "total_score": 30, "reward": 5}, "task": "用代码实现冒泡排序并测试", "difficulty": "hard", "replay_ts": 1148.037}
+{"type": "task_taken", "task_id": "t_2", "agent_id": "agent_12", "task": "比较曹魏/蜀汉/东吴疆域面积", "replay_ts": 1152.524}
+{"type": "task_dispatched", "agent_id": "agent_12", "task": "比较曹魏/蜀汉/东吴疆域面积", "replay_ts": 1152.524}
+{"type": "task_available", "task_id": "t_3", "task": "查询阿波罗11号登月日期并计算纪念日", "difficulty": "medium", "created_at": "1772980986.071497", "replay_ts": 1182.532}
+{"type": "sprite_move", "agent_id": "agent_12", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1208.826}
+{"type": "agent_message", "from_id": "agent_13", "from_name": "诸葛孔明", "to_id": "agent_11", "to_name": "关云长", "content": "云长将军勇冠三军，亮心甚佩。今虽军功有别，然合则两利。愿与将军结盟，君仗武力，亮献奇谋，互补长短，共图大业。军功必增，汉室可兴，望将军允诺。", "msg_type": "alliance", "ts": "2026-03-08T14:43:44.987572+00:00", "replay_ts": 1221.449}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1226.956}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1229.53}
+{"type": "task_taken", "task_id": "t_3", "agent_id": "agent_11", "task": "查询阿波罗11号登月日期并计算纪念日", "replay_ts": 1239.825}
+{"type": "task_dispatched", "agent_id": "agent_11", "task": "查询阿波罗11号登月日期并计算纪念日", "replay_ts": 1239.827}
+{"type": "task_available", "task_id": "t_4", "task": "找出3个以B开头的国家首都", "difficulty": "medium", "created_at": "1772981073.372272", "replay_ts": 1269.832}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1298.247}
+{"type": "task_complete", "agent_id": "agent_11", "success": true, "balance": 18, "judge": {"completion": 10, "quality": 9, "efficiency": 9, "reason": "回答准确完整，结构清晰，且合理使用了工具。", "skipped": false, "total_score": 28, "reward": 5}, "task": "查询阿波罗11号登月日期并计算纪念日", "difficulty": "medium", "replay_ts": 1308.663}
+{"type": "task_taken", "task_id": "t_4", "agent_id": "agent_10", "task": "找出3个以B开头的国家首都", "replay_ts": 1318.238}
+{"type": "task_dispatched", "agent_id": "agent_10", "task": "找出3个以B开头的国家首都", "replay_ts": 1318.238}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1341.014}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1344.305}
+{"type": "task_available", "task_id": "t_5", "task": "查询世界前5大城市人口并求平均", "difficulty": "medium", "created_at": "1772981151.78025", "replay_ts": 1348.24}

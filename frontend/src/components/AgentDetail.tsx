@@ -3,23 +3,16 @@ import { useEffect, useState } from "react";
 import { evotownEvents } from "../phaser/events";
 import { useEvotownStore } from "../store/evotownStore";
 import { ShareCard } from "./ShareCard";
-import { adminFetch } from "../hooks/useAdminToken";
+import { AgentHeader, TabBar } from "./agent/AgentHeader";
+import { ExecutionTab } from "./agent/ExecutionTab";
+import { DecisionList } from "./agent/DecisionList";
+import { RuleTab, type Rule } from "./agent/RuleTab";
+import { PromptTab } from "./agent/PromptTab";
+import { SkillTab, type Skill } from "./agent/SkillTab";
+import { EvolutionTab, type EvolutionLogItem } from "./agent/EvolutionTab";
+import { SoulTab, type SoulData } from "./agent/SoulTab";
 
-
-interface SoulData {
-  content: string;
-  soul_type: string;
-}
-
-interface Rule {
-  id?: string;
-  instruction?: string;
-  content?: string;
-  effectiveness?: number;
-  tool_hint?: string;
-  has_skill?: boolean;
-  origin?: string;
-}
+type TabType = "executions" | "decisions" | "rules" | "prompts" | "skills" | "evolution" | "soul";
 
 interface PromptItem {
   name: string;
@@ -29,129 +22,6 @@ interface PromptItem {
   original_content?: string | null;
 }
 
-type DiffLineKind = "added" | "removed" | "unchanged";
-interface DiffLine { kind: DiffLineKind; text: string; }
-
-/** 基于 LCS 的逐行 diff，返回带标注的行列表 */
-function computeDiff(original: string, current: string): DiffLine[] {
-  const a = original.split("\n");
-  const b = current.split("\n");
-  const m = a.length, n = b.length;
-  // LCS dp table
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
-  // backtrack
-  const result: DiffLine[] = [];
-  let i = m, j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-      result.push({ kind: "unchanged", text: a[i - 1] }); i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      result.push({ kind: "added", text: b[j - 1] }); j--;
-    } else {
-      result.push({ kind: "removed", text: a[i - 1] }); i--;
-    }
-  }
-  return result.reverse();
-}
-
-function PromptDiffView({ original, current }: { original: string; current: string }) {
-  const CONTEXT = 3;
-  const lines = computeDiff(original, current);
-  const addedCount = lines.filter((l) => l.kind === "added").length;
-  const removedCount = lines.filter((l) => l.kind === "removed").length;
-
-  // Build visible index set: all non-unchanged lines + CONTEXT lines around them
-  const visibleSet = new Set<number>();
-  lines.forEach((l, idx) => {
-    if (l.kind !== "unchanged") {
-      for (let k = Math.max(0, idx - CONTEXT); k <= Math.min(lines.length - 1, idx + CONTEXT); k++) {
-        visibleSet.add(k);
-      }
-    }
-  });
-
-  // Render, collapsing hidden runs
-  const rendered: React.ReactNode[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    if (visibleSet.has(i)) {
-      const l = lines[i];
-      rendered.push(
-        <div
-          key={i}
-          className={
-            l.kind === "added"
-              ? "bg-violet-900/30 text-violet-200 border-l-2 border-violet-500 pl-2 -ml-2"
-              : l.kind === "removed"
-              ? "bg-red-900/20 text-red-400/70 line-through border-l-2 border-red-700/50 pl-2 -ml-2"
-              : "text-slate-600"
-          }
-        >
-          {l.kind === "added" && <span className="mr-1 text-violet-400 select-none">+</span>}
-          {l.kind === "removed" && <span className="mr-1 text-red-500/70 select-none">−</span>}
-          {l.kind === "unchanged" && <span className="mr-1 text-slate-700 select-none"> </span>}
-          <span className="whitespace-pre-wrap break-words">{l.text || "\u00a0"}</span>
-        </div>
-      );
-      i++;
-    } else {
-      // count skipped lines
-      let skipped = 0;
-      while (i < lines.length && !visibleSet.has(i)) { skipped++; i++; }
-      rendered.push(
-        <div key={`skip-${i}`} className="text-slate-700 text-[10px] py-0.5 select-none">
-          ···{skipped} 行未变···
-        </div>
-      );
-    }
-  }
-
-  if (visibleSet.size === 0) {
-    return (
-      <div className="p-3 text-[11px] text-slate-500 italic">内容无变化（快照与当前版本相同）</div>
-    );
-  }
-
-  return (
-    <div className="text-[11px] font-mono leading-relaxed">
-      <div className="flex items-center gap-3 px-3 py-1.5 bg-slate-900/50 border-b border-slate-700/40 text-[10px]">
-        {addedCount > 0 && <span className="text-violet-400">+{addedCount} 新增</span>}
-        {removedCount > 0 && <span className="text-red-400/70">−{removedCount} 移除</span>}
-        {addedCount === 0 && removedCount === 0 && <span className="text-slate-500">无变化</span>}
-      </div>
-      <div className="p-3 max-h-72 overflow-y-auto space-y-0">{rendered}</div>
-    </div>
-  );
-}
-
-interface Decision {
-  id?: number;
-  ts?: string;
-  session_id?: string;
-  total_tools?: number;
-  failed_tools?: number;
-  replans?: number;
-  elapsed_ms?: number;
-  task_completed?: boolean;
-  feedback?: string;
-  evolved?: boolean;
-  task_description?: string;
-  tools_detail?: string;
-
-  [k: string]: unknown;
-}
-
-interface EvolutionLogItem {
-  ts: string;
-  type: string;
-  target_id: string;
-  reason: string;
-}
-
-/** 执行记录：拒绝 / 已执行 */
 interface ExecutionLogItem {
   ts: string | number;
   task: string;
@@ -163,104 +33,6 @@ interface ExecutionLogItem {
   elapsed_ms?: number;
 }
 
-function PromptTab({
-  prompts,
-  onRefresh,
-  loading,
-}: {
-  prompts: PromptItem[];
-  onRefresh: () => void;
-  loading: boolean;
-}) {
-  const [showDiff, setShowDiff] = useState<Record<string, boolean>>({});
-
-  const header = (
-    <div className="flex items-center justify-between gap-2 mb-1">
-      <p className="text-xs text-slate-500">
-        <span className="text-violet-400">+紫色</span> = 进化新增，
-        <span className="text-red-400/70 line-through">−红色</span> = 原有已移除
-      </p>
-      <button
-        onClick={onRefresh}
-        disabled={loading}
-        className="shrink-0 px-2 py-0.5 rounded text-[10px] bg-slate-700/60 text-slate-400 border border-slate-600/40 hover:bg-slate-600/60 hover:text-slate-200 transition-colors disabled:opacity-40"
-      >
-        {loading ? "刷新中…" : "↻ 刷新"}
-      </button>
-    </div>
-  );
-
-  if (prompts.length === 0) {
-    return (
-      <div className="space-y-2">
-        {header}
-        <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
-          暂无 Prompts
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {header}
-      {prompts.map((p) => {
-        const canDiff = p.evolved && !!p.original_content;
-        const isDiffMode = canDiff && (showDiff[p.name] ?? true);
-        return (
-          <div
-            key={p.name}
-            className={`rounded-xl border text-xs overflow-hidden ${
-              p.evolved ? "bg-violet-900/10 border-violet-700/40" : "bg-slate-800/40 border-slate-700/40"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-700/50 bg-slate-900/30">
-              <span className="font-mono font-medium text-slate-200">{p.filename}</span>
-              <div className="flex items-center gap-2 shrink-0">
-                {p.evolved && (
-                  <span
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-violet-900/50 text-violet-400 border border-violet-600/50"
-                    title="曾被进化修改"
-                  >
-                    ✨ 进化
-                  </span>
-                )}
-                {canDiff && (
-                  <button
-                    onClick={() => setShowDiff((prev) => ({ ...prev, [p.name]: !isDiffMode }))}
-                    className="px-1.5 py-0.5 rounded text-[10px] bg-slate-700/60 text-slate-400 border border-slate-600/40 hover:bg-slate-600/60 hover:text-slate-200 transition-colors"
-                  >
-                    {isDiffMode ? "原文" : "对比"}
-                  </button>
-                )}
-              </div>
-            </div>
-            {isDiffMode && p.original_content != null ? (
-              <PromptDiffView original={p.original_content} current={p.content} />
-            ) : (
-              <pre className="p-3 text-slate-400 whitespace-pre-wrap break-words font-mono text-[11px] max-h-48 overflow-y-auto">
-                {p.content || "(空)"}
-              </pre>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-const EVO_TYPE_LABELS: Record<string, string> = {
-  rule_added: "规则+",
-  rule_retired: "规则-",
-  example_added: "示例+",
-  skill_pending: "技能待确认",
-  skill_confirmed: "技能确认",
-  skill_refined: "技能优化",
-  skill_retired: "技能归档",
-  evolution_run: "运行",
-  auto_rollback: "回滚",
-};
-
 export function AgentDetail({
   agentId,
   onClose,
@@ -268,34 +40,23 @@ export function AgentDetail({
 }: {
   agentId: string;
   onClose: () => void;
-  initialTab?: "rules" | "skills" | "decisions" | "evolution" | "soul" | "executions" | "prompts";
+  initialTab?: TabType;
 }) {
-  const [tab, setTab] = useState<
-    "rules" | "skills" | "decisions" | "evolution" | "soul" | "executions" | "prompts"
-  >(initialTab ?? "executions");
+  const [tab, setTab] = useState<TabType>(initialTab ?? "executions");
   const [rules, setRules] = useState<Rule[]>([]);
   const [prompts, setPrompts] = useState<PromptItem[]>([]);
-  const [skills, setSkills] = useState<
-    { name: string; status: string; description?: string; created_at?: string; call_count?: number; success_count?: number }[]
-  >([]);
-  const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
-  const [skillContent, setSkillContent] = useState<Record<string, { skill_md: string | null; scripts: { filename: string; content: string }[] }>>({});
-  const [skillContentLoading, setSkillContentLoading] = useState<string | null>(null);
-  const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [decisions, setDecisions] = useState<{ id?: number; ts?: string; total_tools?: number; failed_tools?: number; replans?: number; elapsed_ms?: number; task_completed?: boolean; feedback?: string; evolved?: boolean; task_description?: string; tools_detail?: string; [k: string]: unknown }[]>([]);
   const [executionLog, setExecutionLog] = useState<ExecutionLogItem[]>([]);
   const [evolutionLog, setEvolutionLog] = useState<EvolutionLogItem[]>([]);
   const [soul, setSoul] = useState<SoulData | null>(null);
-  const [soulEdit, setSoulEdit] = useState("");
-  const [soulSaving, setSoulSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
-  const [repairing, setRepairing] = useState(false);
-  const [repairMsg, setRepairMsg] = useState<string | null>(null);
   const [showShare, setShowShare] = useState(false);
+  const [promptsLoading, setPromptsLoading] = useState(false);
+
   const removeAgent = useEvotownStore((s) => s.removeAgent);
   const agent = useEvotownStore((s) => s.agents.find((a) => a.id === agentId));
-
-  const [promptsLoading, setPromptsLoading] = useState(false);
 
   const loadPrompts = async () => {
     setPromptsLoading(true);
@@ -342,19 +103,19 @@ export function AgentDetail({
         setSkills(
           Array.isArray(skillsRaw)
             ? skillsRaw.map((s: unknown) =>
-                typeof s === "string" ? { name: s, status: "confirmed" } : (s as typeof skills[number])
+                typeof s === "string" ? { name: s, status: "confirmed" } : s as Skill
               )
             : []
         );
 
-        const decisionsData = (await safeJson(dRes, [])) as Decision[];
+        const decisionsData = (await safeJson(dRes, [])) as typeof decisions;
         setDecisions(decisionsData);
 
         if (exeRes.ok) {
           setExecutionLog((await safeJson(exeRes, [])) as ExecutionLogItem[]);
         } else {
           setExecutionLog(
-            decisionsData.slice(0, 30).map((d: Decision) => ({
+            decisionsData.slice(0, 30).map((d) => ({
               ts: d.ts ?? "",
               task: d.task_description ?? "-",
               status: "executed" as const,
@@ -381,7 +142,6 @@ export function AgentDetail({
         const soulData = await safeJson(soulRes, null);
         if (soulData && typeof soulData === "object" && "content" in (soulData as Record<string, unknown>)) {
           setSoul(soulData as SoulData);
-          setSoulEdit((soulData as SoulData).content ?? "");
         } else {
           setSoul(null);
         }
@@ -396,7 +156,6 @@ export function AgentDetail({
     return () => { cancelled = true; };
   }, [agentId]);
 
-  // Prompts: load once on mount, no polling — only changes during evolution
   useEffect(() => {
     loadPrompts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -406,28 +165,12 @@ export function AgentDetail({
     if (initialTab) setTab(initialTab);
   }, [agentId, initialTab]);
 
-  const saveSoul = async () => {
-    setSoulSaving(true);
-    try {
-      const res = await adminFetch(`/agents/${agentId}/soul`, {
-        method: "PUT",
-        body: JSON.stringify({ content: soulEdit }),
-      });
-      const data = await res.json();
-      if (data?.ok) {
-        setSoul((prev) => (prev ? { ...prev, content: soulEdit } : { content: soulEdit, soul_type: "balanced" }));
-      }
-    } finally {
-      setSoulSaving(false);
-    }
-  };
-
   const handleDelete = async () => {
     const displayName = agent?.display_name || agentId;
     if (!window.confirm(`确定要删除 Agent「${displayName}」吗？删除后可从竞技场重新创建。`)) return;
     setDeleting(true);
     try {
-      const res = await adminFetch(`/agents/${agentId}`, { method: "DELETE" });
+      const res = await fetch(`/agents/${agentId}`, { method: "DELETE" });
       if (res.ok) {
         removeAgent(agentId);
         evotownEvents.emit("agent_eliminated", { agent_id: agentId, reason: "user_deleted" });
@@ -445,531 +188,51 @@ export function AgentDetail({
     }
   };
 
-  return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-slate-900/95 backdrop-blur-sm border-l border-slate-600/50 min-w-0 overflow-hidden">
-      {/* Agent 信息头部 */}
-      <div className="border-b border-slate-600/50 bg-gradient-to-b from-slate-900 to-slate-950 p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold text-slate-100 truncate leading-tight">
-              {agent?.display_name || agentId}
-            </h3>
-            {agent && (
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                <span className="text-[10px] text-slate-400">
-                  ⚔️ <span className="text-amber-400 font-medium">{agent.balance} 军功</span>
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  📋 {agent.success_count ?? 0}/{agent.task_count ?? 0}
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  ✨ {agent.evolution_success_count ?? 0}/{agent.evolution_count ?? 0}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setShowShare(true)}
-              className="px-2 py-1 text-[10px] font-medium rounded bg-violet-600/20 text-violet-400 border border-violet-600/30 hover:bg-violet-600/40"
-              title="生成分享卡片"
-            >
-              📤
-            </button>
-            <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="px-2 py-1 text-[10px] font-medium rounded bg-rose-600/20 text-rose-400 border border-rose-600/30 hover:bg-rose-600/40 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {deleting ? "删除中..." : "删除"}
-            </button>
-            <button
-              onClick={onClose}
-              className="text-slate-400 hover:text-white text-lg leading-none px-1"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      </div>
-      <div className="flex border-b border-slate-600/50 overflow-x-auto">
-        {(["executions", "decisions", "rules", "prompts", "skills", "evolution", "soul"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-3 py-2 text-xs font-medium transition-colors shrink-0 ${
-              tab === t
-                ? "text-evo-accent border-b-2 border-evo-accent"
-                : "text-slate-500 hover:text-slate-300"
-            }`}
-          >
-            {t === "executions" ? "执行记录" : t === "rules" ? "规则" : t === "prompts" ? "Prompts" : t === "skills" ? "技能" : t === "decisions" ? "决策" : t === "evolution" ? "进化" : "Soul"}
-          </button>
-        ))}
-      </div>
-      <div className="flex-1 overflow-y-auto p-3">
-        {loading ? (
-          <p className="text-sm text-slate-500">加载中...</p>
-        ) : tab === "executions" ? (
+  const renderTabContent = () => {
+    if (loading) {
+      return <p className="text-sm text-slate-500">加载中...</p>;
+    }
+
+    switch (tab) {
+      case "executions":
+        return (
           <div className="space-y-2">
             <p className="text-xs text-slate-500">军令态度与执行（最近 30 条：拒绝 / 接令并执行）</p>
-            {executionLog.length === 0 ? (
-              <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
-                暂无军令记录
-              </p>
-            ) : (
-              <ul className="space-y-1.5 font-mono text-xs">
-                {executionLog.map((e, i) => (
-                  <li key={i} className="flex flex-wrap gap-2 py-1.5 px-2 rounded hover:bg-slate-800/40 items-baseline">
-                    <span className="text-slate-500 shrink-0 whitespace-nowrap">
-                      {typeof e.ts === "number"
-                        ? new Date(e.ts * 1000).toLocaleString("zh-CN")
-                        : e.ts
-                          ? new Date(e.ts).toLocaleString("zh-CN")
-                          : "-"}
-                    </span>
-                    <span className="truncate text-slate-300 min-w-0" title={e.task}>
-                      {e.task || "-"}
-                    </span>
-                    {e.status === "refused" ? (
-                      <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-rose-900/50 text-rose-400 border border-rose-700/50">
-                        拒绝
-                      </span>
-                    ) : (
-                      <span
-                        className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] ${
-                          e.task_completed
-                            ? "bg-emerald-900/50 text-emerald-400 border border-emerald-700/50"
-                            : "bg-amber-900/50 text-amber-400 border border-amber-700/50"
-                        }`}
-                      >
-                        {e.task_completed ? "✓ 完成" : "○ 未完成"}
-                      </span>
-                    )}
-                    {e.status === "refused" && e.refusal_reason && (
-                      <span className="text-slate-500 text-[10px] truncate max-w-[180px]" title={e.refusal_reason}>
-                        {e.refusal_reason}
-                      </span>
-                    )}
-                    {e.status === "executed" && (e.total_tools != null || e.elapsed_ms != null) && (
-                      <span className="text-slate-500 text-[10px]">
-                        {e.total_tools != null && `🔧 ${e.total_tools}次`}
-                        {e.failed_tools != null && e.failed_tools > 0 && (
-                          <span className="text-amber-400"> 失败{e.failed_tools}</span>
-                        )}
-                        {e.elapsed_ms != null && ` ⏱ ${e.elapsed_ms}ms`}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ExecutionTab logs={executionLog} />
           </div>
-        ) : tab === "rules" ? (
-          <ul className="space-y-2">
-            {rules.length === 0 ? (
-              <li className="text-sm text-slate-500">暂无规则</li>
-            ) : (
-              rules.map((r, i) => (
-                <li
-                  key={r.id ?? i}
-                  className={`px-3 py-2.5 rounded border text-xs ${
-                    r.origin === "evolved"
-                      ? "bg-violet-900/20 border-violet-700/40"
-                      : "bg-slate-800/50 border-slate-700/50"
-                  }`}
-                >
-                  {/* 标签行 */}
-                  {(r.origin === "evolved" || r.tool_hint != null || r.effectiveness != null) && (
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      {r.origin === "evolved" && (
-                        <span
-                          className="px-1.5 py-0.5 rounded text-[10px] bg-violet-900/50 text-violet-400 border border-violet-600/50"
-                          title="进化产出"
-                        >
-                          ✨ 进化
-                        </span>
-                      )}
-                      {r.tool_hint != null && (
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] ${
-                            r.has_skill
-                              ? "bg-emerald-900/50 text-emerald-400 border border-emerald-700/50"
-                              : "bg-amber-900/30 text-amber-500/90 border border-amber-700/30"
-                          }`}
-                          title={r.has_skill ? "已拥有此技能" : "未拥有此技能"}
-                        >
-                          {r.tool_hint}
-                          {r.has_skill ? " ✓" : " ✗"}
-                        </span>
-                      )}
-                      {r.effectiveness != null && (
-                        <span className="text-[10px] text-slate-500 ml-auto">
-                          效能 {r.effectiveness}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {/* 正文 */}
-                  <p className="text-slate-300 leading-relaxed whitespace-pre-wrap break-words">
-                    {r.instruction ?? r.content ?? JSON.stringify(r)}
-                  </p>
-                </li>
-              ))
-            )}
-          </ul>
-        ) : tab === "prompts" ? (
-          <PromptTab prompts={prompts} onRefresh={loadPrompts} loading={promptsLoading} />
-        ) : tab === "skills" ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] text-slate-500">内置技能 + 进化技能</span>
-              <button
-                onClick={async () => {
-                  setRepairing(true);
-                  setRepairMsg(null);
-                  try {
-                    const res = await adminFetch(`/agents/${agentId}/repair-skills`, { method: "POST" });
-                    const data = await res.json();
-                    setRepairMsg(data.ok ? "✅ 修复完成" : `❌ ${data.error ?? "修复失败"}`);
-                    if (data.ok) {
-                      // 刷新技能列表
-                      const sRes = await fetch(`/agents/${agentId}/skills`);
-                      const skillsRaw = (await sRes.json()) as unknown[];
-                      setSkills(
-                        Array.isArray(skillsRaw)
-                          ? skillsRaw.map((s: unknown) =>
-                              typeof s === "string" ? { name: s, status: "confirmed" } : (s as typeof skills[number])
-                            )
-                          : []
-                      );
-                    }
-                  } catch {
-                    setRepairMsg("❌ 请求失败");
-                  } finally {
-                    setRepairing(false);
-                  }
-                }}
-                disabled={repairing}
-                className="px-2 py-1 text-[10px] font-medium rounded bg-sky-600/20 text-sky-400 border border-sky-600/30 hover:bg-sky-600/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="重新从 arena_skills 部署技能依赖，修复损坏的符号链接"
-              >
-                {repairing ? "修复中…" : "🔧 修复技能"}
-              </button>
-            </div>
-            {repairMsg && (
-              <p className="text-[11px] px-2 py-1 rounded bg-slate-800/50 text-slate-300 border border-slate-600/40">
-                {repairMsg}
-              </p>
-            )}
-            {skills.length === 0 ? (
-              <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
-                暂无进化技能
-              </p>
-            ) : (
-              skills.map((s) => {
-                const isExpanded = expandedSkill === s.name;
-                const content = skillContent[s.name];
-                const isLoadingThis = skillContentLoading === s.name;
+        );
+      case "rules":
+        return <RuleTab rules={rules} />;
+      case "prompts":
+        return <PromptTab prompts={prompts} onRefresh={loadPrompts} loading={promptsLoading} />;
+      case "skills":
+        return <SkillTab agentId={agentId} skills={skills} onSkillsChange={setSkills} />;
+      case "evolution":
+        return <EvolutionTab evolutionLog={evolutionLog} />;
+      case "soul":
+        return <SoulTab agentId={agentId} soul={soul} onSoulChange={setSoul} />;
+      case "decisions":
+        return <DecisionList decisions={decisions} />;
+      default:
+        return null;
+    }
+  };
 
-                const toggleExpand = async () => {
-                  if (isExpanded) {
-                    setExpandedSkill(null);
-                    return;
-                  }
-                  setExpandedSkill(s.name);
-                  if (!skillContent[s.name]) {
-                    setSkillContentLoading(s.name);
-                    try {
-                      const res = await fetch(`/agents/${agentId}/skills/${s.name}/content`);
-                      if (res.ok) {
-                        const data = await res.json();
-                        setSkillContent((prev) => ({ ...prev, [s.name]: data }));
-                      }
-                    } catch { /* ignore */ } finally {
-                      setSkillContentLoading(null);
-                    }
-                  }
-                };
-
-                return (
-                  <div
-                    key={s.name}
-                    className={`rounded-xl border text-xs transition-all ${
-                      s.status === "pending"
-                        ? "bg-gradient-to-b from-amber-950/20 to-slate-800/50 border-amber-700/40"
-                        : "bg-slate-800/40 border-slate-700/40"
-                    }`}
-                  >
-                    <div className="p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <button
-                          onClick={toggleExpand}
-                          className="flex items-center gap-2 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity"
-                        >
-                          <span className="text-slate-500 text-[10px] shrink-0">{isExpanded ? "▼" : "▶"}</span>
-                          <span className="font-mono text-slate-200 font-medium truncate">{s.name}</span>
-                          <span
-                            className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              s.status === "pending"
-                                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                                : s.status === "installed"
-                                ? "bg-sky-500/20 text-sky-400 border border-sky-500/30"
-                                : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                            }`}
-                          >
-                            {s.status === "pending" ? "待确认" : s.status === "installed" ? "内置" : "已启用"}
-                          </span>
-                        </button>
-                        {s.status === "pending" && (
-                          <div className="flex gap-1.5 shrink-0">
-                            <button
-                              onClick={async () => {
-                                const res = await adminFetch(`/agents/${agentId}/skills/${s.name}/confirm`, { method: "POST" });
-                                const data = await res.json();
-                                if (data.ok) {
-                                  setSkills((prev) =>
-                                    prev.map((sk) => sk.name === s.name ? { ...sk, status: "confirmed" } : sk)
-                                  );
-                                }
-                              }}
-                              className="px-2 py-1 rounded text-[10px] font-medium bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 hover:bg-emerald-600/40 transition-colors"
-                            >
-                              确认
-                            </button>
-                            <button
-                              onClick={async () => {
-                                const res = await adminFetch(`/agents/${agentId}/skills/${s.name}/reject`, { method: "POST" });
-                                const data = await res.json();
-                                if (data.ok) {
-                                  setSkills((prev) => prev.filter((sk) => sk.name !== s.name));
-                                  if (expandedSkill === s.name) setExpandedSkill(null);
-                                }
-                              }}
-                              className="px-2 py-1 rounded text-[10px] font-medium bg-rose-600/20 text-rose-400 border border-rose-600/30 hover:bg-rose-600/40 transition-colors"
-                            >
-                              拒绝
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      {s.description && (
-                        <p className="text-slate-400 text-[11px] leading-relaxed">{s.description}</p>
-                      )}
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
-                        {s.created_at && (
-                          <span>创建: {new Date(s.created_at).toLocaleString("zh-CN")}</span>
-                        )}
-                        {s.call_count != null && s.status === "confirmed" && (
-                          <span>调用 {s.call_count} 次</span>
-                        )}
-                        {s.success_count != null && s.status === "confirmed" && s.call_count != null && s.call_count > 0 && (
-                          <span>成功 {s.success_count} 次</span>
-                        )}
-                      </div>
-                    </div>
-                    {isExpanded && (
-                      <div className="border-t border-slate-700/50 px-3 pb-3 pt-2 space-y-3">
-                        {isLoadingThis ? (
-                          <p className="text-[11px] text-slate-500 py-2 text-center">加载中…</p>
-                        ) : !content ? (
-                          <p className="text-[11px] text-slate-500 py-2 text-center">内容不可用</p>
-                        ) : (
-                          <>
-                            {content.skill_md && (
-                              <div>
-                                <p className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wide">SKILL.md</p>
-                                <pre className="bg-slate-900/60 border border-slate-700/40 rounded-lg p-2.5 text-[10px] text-slate-300 leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{content.skill_md}</pre>
-                              </div>
-                            )}
-                            {content.scripts.map((sc) => (
-                              <div key={sc.filename}>
-                                <p className="text-[10px] text-slate-500 mb-1 font-medium">
-                                  <span className="font-mono text-sky-400">scripts/{sc.filename}</span>
-                                </p>
-                                <pre className="bg-slate-900/80 border border-slate-700/40 rounded-lg p-2.5 text-[10px] text-emerald-300/90 leading-relaxed overflow-x-auto whitespace-pre max-h-64 overflow-y-auto font-mono">{sc.content}</pre>
-                              </div>
-                            ))}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        ) : tab === "evolution" ? (
-          <div className="space-y-2">
-            <p className="text-xs text-slate-500">进化事件明细（时间倒序）</p>
-            {evolutionLog.length === 0 ? (
-              <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
-                暂无进化记录
-              </p>
-            ) : (
-              <div className="rounded-lg border border-slate-700/50 overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-slate-800/50 text-slate-400">
-                      <th className="text-left py-2 px-2 font-medium">时间</th>
-                      <th className="text-left py-2 px-2 font-medium">类型</th>
-                      <th className="text-left py-2 px-2 font-medium">目标</th>
-                      <th className="text-left py-2 px-2 font-medium">说明</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {evolutionLog.map((e, i) => (
-                      <tr key={i} className="border-t border-slate-700/30 hover:bg-slate-800/30">
-                        <td className="py-1.5 px-2 text-slate-500 whitespace-nowrap">
-                          {e.ts ? new Date(e.ts).toLocaleString("zh-CN") : "-"}
-                        </td>
-                        <td className="py-1.5 px-2">
-                          <span className="px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-300">
-                            {EVO_TYPE_LABELS[e.type] ?? e.type}
-                          </span>
-                        </td>
-                        <td className="py-1.5 px-2 font-mono text-slate-400 truncate max-w-[80px]" title={e.target_id}>
-                          {e.target_id || "-"}
-                        </td>
-                        <td className="py-1.5 px-2 text-slate-400 break-words max-w-[180px]">
-                          {e.reason || "-"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        ) : tab === "soul" ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              {soul ? (
-                <span className="text-slate-500 text-xs">
-                  类型: {soul.soul_type === "conservative" ? "保守" : soul.soul_type === "aggressive" ? "激进" : "均衡"}
-                </span>
-              ) : (
-                <span className="text-slate-500 text-xs">Soul 文件</span>
-              )}
-              <button
-                onClick={saveSoul}
-                disabled={soulSaving || (soul ? soulEdit === soul.content : false)}
-                className="px-3 py-1 text-xs rounded bg-evo-accent/20 text-evo-accent border border-evo-accent/20 hover:bg-evo-accent/30 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {soulSaving ? "保存中..." : "保存"}
-              </button>
-            </div>
-            <textarea
-              value={soulEdit}
-              onChange={(e) => setSoulEdit(e.target.value)}
-              className="w-full h-64 p-3 rounded bg-slate-800/50 border border-slate-700/50 text-slate-300 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-evo-accent/50"
-              placeholder="SOUL.md"
-              spellCheck={false}
-            />
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {decisions.length === 0 ? (
-              <li className="text-sm text-slate-500 py-6 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
-                暂无决策记录（需 agent 至少调用 1 次工具才会记录，SkillLite 据此触发进化）
-              </li>
-            ) : (
-              decisions.map((d, i) => (
-                <li
-                  key={d.id ?? i}
-                  className={`relative overflow-hidden rounded-xl border text-xs transition-all ${
-                    d.evolved
-                      ? "bg-slate-800/25 border-slate-600/40 opacity-90"
-                      : d.task_completed
-                        ? "bg-gradient-to-b from-emerald-950/20 to-slate-800/50 border-emerald-800/30"
-                        : "bg-gradient-to-b from-amber-950/15 to-slate-800/50 border-amber-800/30"
-                  }`}
-                >
-                  <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-slate-500/30 to-transparent" />
-                  <div className="p-3.5 space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                            d.task_completed
-                              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                              : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                          }`}
-                        >
-                          {d.task_completed ? "✓ 完成" : "○ 未完成"}
-                        </span>
-                        {d.evolved && (
-                          <span
-                            className="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-violet-900/50 text-violet-400 border border-violet-600/50"
-                            title="该决策已被进化引擎使用"
-                          >
-                            ✨ 已进化
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-slate-500 text-[10px] shrink-0">
-                        {d.ts ? new Date(d.ts).toLocaleString("zh-CN") : ""}
-                      </span>
-                    </div>
-                    <p className="text-slate-200 font-medium break-words leading-relaxed pl-0.5">
-                      {d.task_description ?? "-"}
-                    </p>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-500 text-[10px]">
-                      <span className="flex items-center gap-1">
-                        <span className="text-slate-600">🔧</span> {d.total_tools ?? 0} 次
-                      </span>
-                      {d.failed_tools != null && d.failed_tools > 0 && (
-                        <span className="text-amber-400">失败 {d.failed_tools}</span>
-                      )}
-                      {d.replans != null && d.replans > 0 && (
-                        <span>🔄 重规划 {d.replans}</span>
-                      )}
-                      {d.elapsed_ms != null && (
-                        <span>⏱ {d.elapsed_ms}ms</span>
-                      )}
-                      {d.feedback && d.feedback !== "neutral" && (
-                        <span className="text-slate-400">反馈: {d.feedback}</span>
-                      )}
-                    </div>
-                    {d.tools_detail && (() => {
-                      try {
-                        const tools = JSON.parse(d.tools_detail) as { tool?: string; success?: boolean }[];
-                        if (Array.isArray(tools) && tools.length > 0) {
-                          return (
-                            <div className="mt-2 pt-2 border-t border-slate-700/50">
-                              <p className="text-slate-500 mb-1.5 text-[10px] font-medium">工具明细</p>
-                              <ul className="space-y-2">
-                                {tools.map((t, j) => (
-                                  <li key={j} className="flex items-center gap-2 py-1 px-2 rounded bg-slate-900/40">
-                                    <span
-                                      className={`w-4 h-4 rounded flex items-center justify-center text-[10px] shrink-0 ${
-                                        t.success ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/20 text-amber-400"
-                                      }`}
-                                    >
-                                      {t.success ? "✓" : "✗"}
-                                    </span>
-                                    <span className="font-mono text-slate-400 truncate">{t.tool ?? String(t)}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          );
-                        }
-                      } catch {
-                        /* ignore */
-                      }
-                      return null;
-                    })()}
-                  </div>
-                </li>
-              ))
-            )}
-          </ul>
-        )}
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-slate-900/95 backdrop-blur-sm border-l border-slate-600/50 min-w-0 overflow-hidden">
+      <AgentHeader
+        agentId={agentId}
+        agent={agent}
+        onDelete={handleDelete}
+        deleting={deleting}
+        onShowShare={() => setShowShare(true)}
+      />
+      <TabBar currentTab={tab} onTabChange={setTab} />
+      <div className="flex-1 overflow-y-auto p-3">
+        {renderTabContent()}
       </div>
 
       {showShare && (() => {
-        // 取最新一条有意义的 reason 作为"顿悟"内容
         const latestEpiphany =
           [...evolutionLog]
             .reverse()

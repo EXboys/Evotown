@@ -1,0 +1,220 @@
+import { useState } from "react";
+import { adminFetch } from "../../hooks/useAdminToken";
+
+interface Skill {
+  name: string;
+  status: string;
+  description?: string;
+  created_at?: string;
+  call_count?: number;
+  success_count?: number;
+}
+
+interface SkillContent {
+  skill_md: string | null;
+  scripts: { filename: string; content: string }[];
+}
+
+interface SkillTabProps {
+  agentId: string;
+  skills: Skill[];
+  onSkillsChange: (skills: Skill[]) => void;
+}
+
+export function SkillTab({ agentId, skills, onSkillsChange }: SkillTabProps) {
+  const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
+  const [skillContent, setSkillContent] = useState<Record<string, SkillContent>>({});
+  const [skillContentLoading, setSkillContentLoading] = useState<string | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [repairMsg, setRepairMsg] = useState<string | null>(null);
+
+  const handleRepair = async () => {
+    setRepairing(true);
+    setRepairMsg(null);
+    try {
+      const res = await adminFetch(`/agents/${agentId}/repair-skills`, { method: "POST" });
+      const data = await res.json();
+      setRepairMsg(data.ok ? "✅ 修复完成" : `❌ ${data.error ?? "修复失败"}`);
+      if (data.ok) {
+        const sRes = await fetch(`/agents/${agentId}/skills`);
+        const skillsRaw = (await sRes.json()) as unknown[];
+        onSkillsChange(
+          Array.isArray(skillsRaw)
+            ? skillsRaw.map((s: unknown) =>
+                typeof s === "string" ? { name: s, status: "confirmed" } : s as Skill
+              )
+            : []
+        );
+      }
+    } catch {
+      setRepairMsg("❌ 请求失败");
+    } finally {
+      setRepairing(false);
+    }
+  };
+
+  const handleExpand = async (skillName: string) => {
+    if (expandedSkill === skillName) {
+      setExpandedSkill(null);
+      return;
+    }
+    setExpandedSkill(skillName);
+    if (!skillContent[skillName]) {
+      setSkillContentLoading(skillName);
+      try {
+        const res = await fetch(`/agents/${agentId}/skills/${skillName}/content`);
+        if (res.ok) {
+          const data = await res.json();
+          setSkillContent((prev) => ({ ...prev, [skillName]: data }));
+        }
+      } catch { /* ignore */ } finally {
+        setSkillContentLoading(null);
+      }
+    }
+  };
+
+  const handleConfirm = async (skillName: string) => {
+    const res = await adminFetch(`/agents/${agentId}/skills/${skillName}/confirm`, { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      onSkillsChange(
+        skills.map((sk) => sk.name === skillName ? { ...sk, status: "confirmed" } : sk)
+      );
+    }
+  };
+
+  const handleReject = async (skillName: string) => {
+    const res = await adminFetch(`/agents/${agentId}/skills/${skillName}/reject`, { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      const newSkills = skills.filter((sk) => sk.name !== skillName);
+      onSkillsChange(newSkills);
+      if (expandedSkill === skillName) setExpandedSkill(null);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] text-slate-500">内置技能 + 进化技能</span>
+        <button
+          onClick={handleRepair}
+          disabled={repairing}
+          className="px-2 py-1 text-[10px] font-medium rounded bg-sky-600/20 text-sky-400 border border-sky-600/30 hover:bg-sky-600/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title="重新从 arena_skills 部署技能依赖，修复损坏的符号链接"
+        >
+          {repairing ? "修复中…" : "🔧 修复技能"}
+        </button>
+      </div>
+
+      {repairMsg && (
+        <p className="text-[11px] px-2 py-1 rounded bg-slate-800/50 text-slate-300 border border-slate-600/40">
+          {repairMsg}
+        </p>
+      )}
+
+      {skills.length === 0 ? (
+        <p className="text-sm text-slate-500 py-4 text-center rounded-lg bg-slate-800/30 border border-dashed border-slate-600/50">
+          暂无进化技能
+        </p>
+      ) : (
+        skills.map((s) => {
+          const isExpanded = expandedSkill === s.name;
+          const content = skillContent[s.name];
+          const isLoadingThis = skillContentLoading === s.name;
+
+          return (
+            <div
+              key={s.name}
+              className={`rounded-xl border text-xs transition-all ${
+                s.status === "pending"
+                  ? "bg-gradient-to-b from-amber-950/20 to-slate-800/50 border-amber-700/40"
+                  : "bg-slate-800/40 border-slate-700/40"
+              }`}
+            >
+              <div className="p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => handleExpand(s.name)}
+                    className="flex items-center gap-2 min-w-0 flex-1 text-left hover:opacity-80 transition-opacity"
+                  >
+                    <span className="text-slate-500 text-[10px] shrink-0">{isExpanded ? "▼" : "▶"}</span>
+                    <span className="font-mono text-slate-200 font-medium truncate">{s.name}</span>
+                    <span
+                      className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                        s.status === "pending"
+                          ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                          : s.status === "installed"
+                          ? "bg-sky-500/20 text-sky-400 border border-sky-500/30"
+                          : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                      }`}
+                    >
+                      {s.status === "pending" ? "待确认" : s.status === "installed" ? "内置" : "已启用"}
+                    </span>
+                  </button>
+                  {s.status === "pending" && (
+                    <div className="flex gap-1.5 shrink-0">
+                      <button
+                        onClick={() => handleConfirm(s.name)}
+                        className="px-2 py-1 rounded text-[10px] font-medium bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 hover:bg-emerald-600/40 transition-colors"
+                      >
+                        确认
+                      </button>
+                      <button
+                        onClick={() => handleReject(s.name)}
+                        className="px-2 py-1 rounded text-[10px] font-medium bg-rose-600/20 text-rose-400 border border-rose-600/30 hover:bg-rose-600/40 transition-colors"
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {s.description && (
+                  <p className="text-slate-400 text-[11px] leading-relaxed">{s.description}</p>
+                )}
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                  {s.created_at && (
+                    <span>创建: {new Date(s.created_at).toLocaleString("zh-CN")}</span>
+                  )}
+                  {s.call_count != null && s.status === "confirmed" && (
+                    <span>调用 {s.call_count} 次</span>
+                  )}
+                  {s.success_count != null && s.status === "confirmed" && s.call_count != null && s.call_count > 0 && (
+                    <span>成功 {s.success_count} 次</span>
+                  )}
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="border-t border-slate-700/50 px-3 pb-3 pt-2 space-y-3">
+                  {isLoadingThis ? (
+                    <p className="text-[11px] text-slate-500 py-2 text-center">加载中…</p>
+                  ) : !content ? (
+                    <p className="text-[11px] text-slate-500 py-2 text-center">内容不可用</p>
+                  ) : (
+                    <>
+                      {content.skill_md && (
+                        <div>
+                          <p className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wide">SKILL.md</p>
+                          <pre className="bg-slate-900/60 border border-slate-700/40 rounded-lg p-2.5 text-[10px] text-slate-300 leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{content.skill_md}</pre>
+                        </div>
+                      )}
+                      {content.scripts.map((sc) => (
+                        <div key={sc.filename}>
+                          <p className="text-[10px] text-slate-500 mb-1 font-medium">
+                            <span className="font-mono text-sky-400">scripts/{sc.filename}</span>
+                          </p>
+                          <pre className="bg-slate-900/80 border border-slate-700/40 rounded-lg p-2.5 text-[10px] text-emerald-300/90 leading-relaxed overflow-x-auto whitespace-pre max-h-64 overflow-y-auto font-mono">{sc.content}</pre>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}

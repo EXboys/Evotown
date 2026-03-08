@@ -1,12 +1,12 @@
 {
   "agent_counter": 13,
   "task_counter": 163,
-  "global_task_counter": 53,
+  "global_task_counter": 55,
   "agents": [
     {
       "id": "agent_10",
       "display_name": "司马仲达",
-      "balance": 6,
+      "balance": 1,
       "status": "active",
       "soul_type": "balanced",
       "team_id": "0505d288",
@@ -27,12 +27,12 @@
       "rescue_received": 0,
       "solo_preference": false,
       "evolution_focus": "",
-      "loyalty": 34
+      "loyalty": 39
     },
     {
       "id": "agent_12",
       "display_name": "周公瑾",
-      "balance": 10,
+      "balance": 5,
       "status": "active",
       "soul_type": "balanced",
       "team_id": "0505d288",
@@ -45,7 +45,7 @@
     {
       "id": "agent_13",
       "display_name": "诸葛孔明",
-      "balance": 14,
+      "balance": 13,
       "status": "active",
       "soul_type": "balanced",
       "team_id": "c281bd05",
@@ -53,7 +53,7 @@
       "rescue_received": 0,
       "solo_preference": false,
       "evolution_focus": "",
-      "loyalty": 95
+      "loyalty": 100
     }
   ],
   "teams": [
@@ -109,7 +109,8 @@
         "兵家之道，贵在知时算势。探敌情如算时日，毫厘不差，方可一击必中。谋定后动，方为大将之风。",
         "用智如用兵，忌传令频仍。查探虚实，当统筹全局，并问为壹。勿虚耗粮草，谋定后动，一击必中，制胜之道。",
         "用兵忌频倚外物，验证须详陈其理。例证虽确，过程不明难服众。当求简效，直击要害，勿使繁冗耗力。",
-        "兵势如算，贵在精确。去芜存菁，直击要害。勿生枝节，简以致胜。寻根本，一刀破敌，方显忠义本真，谨记。"
+        "兵势如算，贵在精确。去芜存菁，直击要害。勿生枝节，简以致胜。寻根本，一刀破敌，方显忠义本真，谨记。",
+        "治军贵在循序，相邻相较，错位则换。层层推进，乱中取序。稳扎稳打，勿求速成，反复锤炼，终致大胜。"
       ],
       "creed": "",
       "created_at": "2026-03-08T11:59:06.563530+00:00"
