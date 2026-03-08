@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -17,6 +18,12 @@ PREVIEW_TIMEOUT_SEC = 60
 
 # 单进程完成多少个任务后触发受控软重启（清空 LLM 消息历史）
 _TASKS_PER_SOFT_RESTART = 20
+
+# ── 内存看门狗配置 ─────────────────────────────────────────────────────────────
+# 检查间隔（秒）
+MEMORY_WATCHDOG_INTERVAL_SEC = 60
+# 内存阈值（MB），超过此值触发软重启
+MEMORY_WATCHDOG_THRESHOLD_MB = 200
 
 # 每个 agent 的 agent_home 下：chat/（数据）、.skills/（技能，独立进化）
 
@@ -155,6 +162,9 @@ class ProcessManager:
         self._task_done_counts: dict[str, int] = {}
         # 软重启（计划内）的 agent 集合；_drain_stdout 收到 EOF 时走快速路径（1 s 延迟，不累计崩溃次数）
         self._planned_restart: set[str] = set()
+        # ── 内存看门狗 ─────────────────────────────────────────────────────────────
+        # 后台任务：定期检查各子进程内存使用，超阈值触发软重启
+        self._memory_watchdog_task: Optional[asyncio.Task] = None
 
     def set_on_task_done(self, cb: Callable[[str, bool, dict], Awaitable[None]]) -> None:
         """设置任务完成回调：on_task_done(agent_id, success, done_data)"""
@@ -286,6 +296,9 @@ class ProcessManager:
         # 后台消费 stdout，解析 done/error 事件并回调
         asyncio.create_task(self._drain_stdout(agent_id, proc.stdout))
         asyncio.create_task(self._drain_stream(agent_id, proc.stderr, "stderr"))
+
+        # 启动内存看门狗（如果尚未启动）
+        self._start_memory_watchdog()
 
         return str(agent_home), str(chat_root)
 
@@ -510,6 +523,72 @@ class ProcessManager:
             proc.terminate()
         except ProcessLookupError:
             self._planned_restart.discard(agent_id)
+
+    def _start_memory_watchdog(self) -> None:
+        """启动内存看门狗后台任务"""
+        if self._memory_watchdog_task is not None and not self._memory_watchdog_task.done():
+            return
+        self._memory_watchdog_task = asyncio.create_task(self._memory_watchdog_loop())
+
+    async def _memory_watchdog_loop(self) -> None:
+        """内存看门狗：定期检查子进程内存使用，超阈值触发软重启"""
+        logger.info(
+            "memory watchdog started: interval=%ds, threshold=%dMB",
+            MEMORY_WATCHDOG_INTERVAL_SEC, MEMORY_WATCHDOG_THRESHOLD_MB
+        )
+        while True:
+            try:
+                await asyncio.sleep(MEMORY_WATCHDOG_INTERVAL_SEC)
+            except asyncio.CancelledError:
+                break
+
+            # 检查每个 agent 进程的内存使用
+            for agent_id in list(self._processes.keys()):
+                if agent_id not in self._respawn_soul_types:
+                    continue  # 不应自动重启的进程，跳过
+
+                proc = self._processes.get(agent_id)
+                if proc is None or proc.returncode is not None:
+                    continue
+
+                try:
+                    memory_mb = await self._get_process_memory_mb(proc.pid)
+                    if memory_mb > MEMORY_WATCHDOG_THRESHOLD_MB:
+                        logger.warning(
+                            "[%s] memory usage %dMB exceeds threshold %dMB — scheduling soft restart",
+                            agent_id, memory_mb, MEMORY_WATCHDOG_THRESHOLD_MB
+                        )
+                        await self._soft_restart_for_memory(agent_id)
+                except Exception as e:
+                    logger.debug("[%s] failed to get process memory: %s", agent_id, e)
+
+    async def _get_process_memory_mb(self, pid: int) -> float:
+        """获取进程内存使用（MB）"""
+        try:
+            # 使用 ps 命令获取 RSS（Resident Set Size）
+            result = await asyncio.create_subprocess_exec(
+                "ps", "-o", "rss=", "-p", str(pid),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await result.communicate()
+            if result.returncode == 0 and stdout:
+                rss_kb = int(stdout.decode().strip())
+                return rss_kb / 1024  # KB -> MB
+        except (FileNotFoundError, ValueError, ProcessLookupError):
+            pass
+        return 0.0
+
+    async def stop_memory_watchdog(self) -> None:
+        """停止内存看门狗"""
+        if self._memory_watchdog_task is not None:
+            self._memory_watchdog_task.cancel()
+            try:
+                await self._memory_watchdog_task
+            except asyncio.CancelledError:
+                pass
+            self._memory_watchdog_task = None
+            logger.info("memory watchdog stopped")
 
     async def preview_task(
         self,

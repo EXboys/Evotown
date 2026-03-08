@@ -1,9 +1,14 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
 import { TownLayout } from "./components/TownLayout";
 import { ObserverPanel } from "./components/ObserverPanel";
 import { LandingPage } from "./components/LandingPage";
 import { TaskHistoryPage } from "./components/TaskHistoryPage";
 import { ChronicleBook } from "./components/ChronicleBook";
+import { useEvotownStore } from "./store/evotownStore";
+
+/** 定期清理间隔（毫秒） */
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 小时
 
 function ArenaApp() {
   return (
@@ -17,6 +22,16 @@ function ArenaApp() {
 }
 
 function App() {
+  // 定期清理过期事件数据，防止内存泄漏
+  useEffect(() => {
+    const cleanup = useEvotownStore.getState().cleanupExpiredEvents;
+    // 立即执行一次清理
+    cleanup();
+    // 设置定期清理
+    const intervalId = setInterval(cleanup, CLEANUP_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, []);
+
   return (
     <BrowserRouter>
       <Routes>

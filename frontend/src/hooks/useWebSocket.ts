@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { evotownEvents } from "../phaser/events";
 import { useEvotownStore } from "../store/evotownStore";
 import { useChronicleStore } from "../store/chronicleStore";
@@ -7,6 +7,18 @@ const WS_URL = import.meta.env.DEV
   ? "ws://localhost:5174/ws"
   : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const LOG = import.meta.env.DEV;
+
+/** 重连配置 */
+const RECONNECT_CONFIG = {
+  /** 最大重试次数 */
+  maxRetries: 10,
+  /** 初始重连延迟（毫秒） */
+  initialDelay: 1000,
+  /** 最大重连延迟（毫秒） */
+  maxDelay: 30000,
+  /** 退避乘数 */
+  backoffMultiplier: 2,
+};
 
 function log(msg: string, ...args: unknown[]) {
   if (LOG) console.info(`[evotown:ws] ${msg}`, ...args);
@@ -19,32 +31,84 @@ function logError(msg: string, err: unknown) {
 export function useWebSocket() {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  /** 重试计数 */
+  const retryCountRef = useRef(0);
+  /** 当前重连延迟（毫秒） */
+  const currentDelayRef = useRef(RECONNECT_CONFIG.initialDelay);
+
+  /** 计算下一次重连延迟（指数退避） */
+  const getNextDelay = useCallback(() => {
+    const delay = currentDelayRef.current;
+    currentDelayRef.current = Math.min(
+      currentDelayRef.current * RECONNECT_CONFIG.backoffMultiplier,
+      RECONNECT_CONFIG.maxDelay
+    );
+    return delay;
+  }, []);
+
+  /** 请求全量状态同步 */
+  const requestSync = useCallback(() => {
+    evotownEvents.emit("request_sync", {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+
     const connect = () => {
       if (cancelled) return;
+
+      // 检查是否超过最大重试次数
+      if (retryCountRef.current >= RECONNECT_CONFIG.maxRetries) {
+        log(`max retries (${RECONNECT_CONFIG.maxRetries}) reached, stopping reconnection`);
+        return;
+      }
+
       const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+
       ws.onopen = () => {
         if (cancelled) {
           ws.close();
           return;
         }
+        // 重连成功后重置重试计数和延迟
+        const isReconnect = retryCountRef.current > 0;
+        if (isReconnect) {
+          log(`reconnected after ${retryCountRef.current} retries`);
+          retryCountRef.current = 0;
+          currentDelayRef.current = RECONNECT_CONFIG.initialDelay;
+          // 重连成功后主动请求全量状态同步
+          requestSync();
+        }
         setConnected(true);
         log("connected");
-        evotownEvents.emit("request_sync", {});
       };
-      ws.onclose = () => {
-        if (!cancelled) {
-          setConnected(false);
-          log("disconnected, reconnecting in 3s");
-          reconnectRef.current = setTimeout(connect, 3000);
+
+      ws.onclose = (event) => {
+        if (cancelled) return;
+
+        setConnected(false);
+        wsRef.current = null;
+
+        // 清除 pong 超时定时器
+        // 注意：这里会在重连成功后请求全量状态同步
+
+        // 非正常关闭（code != 1000 normal close）才重连
+        if (event.code !== 1000) {
+          retryCountRef.current++;
+          const delay = getNextDelay();
+          log(`disconnected (code=${event.code}), reconnecting in ${delay}ms (retry ${retryCountRef.current}/${RECONNECT_CONFIG.maxRetries})`);
+          reconnectTimeoutRef.current = setTimeout(connect, delay);
+        } else {
+          log("WebSocket closed normally");
         }
       };
+
       ws.onerror = () => {
         logError("WebSocket error", null);
       };
+
       ws.onmessage = (e) => {
         if (cancelled) return;
         const store = useEvotownStore.getState();
@@ -282,6 +346,12 @@ export function useWebSocket() {
               reason: msg.reason as string | undefined,
               version: msg.version as string | undefined,
             });
+          } else if (type === "server_ping") {
+            // 收到服务端心跳请求，立即响应 pong
+            ws.send(JSON.stringify({ type: "pong" }));
+          } else if (type === "pong") {
+            // 收到服务端 pong 响应（备用，可能服务端自己也会处理）
+            log("received pong from server");
           }
         } catch (err) {
           logError("parse message failed", err);
@@ -292,12 +362,12 @@ export function useWebSocket() {
     connect();
     return () => {
       cancelled = true;
-      clearTimeout(reconnectRef.current);
+      clearTimeout(reconnectTimeoutRef.current);
       const ws = wsRef.current;
       wsRef.current = null;
       if (ws?.readyState === WebSocket.OPEN) ws.close();
     };
-  }, []);
+  }, [getNextDelay, requestSync]);
 
   return { connected };
 }

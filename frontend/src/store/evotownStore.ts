@@ -2,6 +2,21 @@
 import { create } from "zustand";
 import { WARRIORS, type WarriorId } from "../phaser/warriorPortraits";
 
+/** 事件数组内存上限配置 */
+const EVENT_LIMITS = {
+  /** 进化事件上限 */
+  evolutionEvents: 100,
+  /** 任务记录上限 */
+  taskRecords: 50,
+  /** 社交消息上限 */
+  socialMessages: 30,
+  /** Agent 决策记录上限 */
+  agentDecisions: 30,
+};
+
+/** 事件保留时间（毫秒），超过此时间的事件将被清理 */
+const EVENT_RETENTION_MS = 24 * 60 * 60 * 1000; // 24 小时
+
 /** 武将 ID 池 */
 const WARRIOR_IDS: WarriorId[] = ["kongming", "zhaoyun", "simayi", "zhouyu", "guanyu", "zhangfei", "liubei", "caocao", "sunquan", "zhangliao", "guojia", "huanggai", "lusu"];
 
@@ -121,10 +136,13 @@ interface EvotownState {
   experimentInfo: ExperimentInfo;
   /** 回放模式 — true 时 WebSocket / AgentSync 不分发事件 */
   replayMode: boolean;
-  /** Agent 间社交消息（最多 60 条，FIFO） */
+  /** Agent 间社交消息 */
   socialMessages: SocialMessage[];
-  /** Agent 自主决策记录（最多 60 条，FIFO） */
+  /** Agent 自主决策记录 */
   agentDecisions: AgentDecision[];
+
+  /** 手动触发过期数据清理 */
+  cleanupExpiredEvents: () => void;
 
   setReplayMode: (mode: boolean) => void;
   setAgents: (agents: AgentInfo[]) => void;
@@ -249,7 +267,7 @@ export const useEvotownStore = create<EvotownState>((set, get) => ({
 
   pushEvolutionEvent: (ev) =>
     set((s) => ({
-      evolutionEvents: [...s.evolutionEvents, ev].slice(-200),
+      evolutionEvents: [...s.evolutionEvents, ev].slice(-EVENT_LIMITS.evolutionEvents),
     })),
 
   setEvolutionLog: (agentId, log) =>
@@ -268,11 +286,11 @@ export const useEvotownStore = create<EvotownState>((set, get) => ({
 
   pushTaskRecord: (record) =>
     set((s) => ({
-      taskRecords: [...s.taskRecords, record].slice(-100),
+      taskRecords: [...s.taskRecords, record].slice(-EVENT_LIMITS.taskRecords),
     })),
 
   hydrateTaskRecords: (records) =>
-    set({ taskRecords: records.slice(-100) }),
+    set({ taskRecords: records.slice(-EVENT_LIMITS.taskRecords) }),
 
   setDispatcherState: (partial) =>
     set((s) => ({
@@ -281,10 +299,37 @@ export const useEvotownStore = create<EvotownState>((set, get) => ({
   setExperimentInfo: (info) => set({ experimentInfo: info }),
   pushSocialMessage: (msg) =>
     set((s) => ({
-      socialMessages: [...s.socialMessages, msg].slice(-60),
+      socialMessages: [...s.socialMessages, msg].slice(-EVENT_LIMITS.socialMessages),
     })),
   pushAgentDecision: (dec) =>
     set((s) => ({
-      agentDecisions: [...s.agentDecisions, dec].slice(-60),
+      agentDecisions: [...s.agentDecisions, dec].slice(-EVENT_LIMITS.agentDecisions),
     })),
+
+  /** 清理过期事件数据 */
+  cleanupExpiredEvents: () =>
+    set((s) => {
+      const now = Date.now();
+      const cutoff = now - EVENT_RETENTION_MS;
+
+      const isExpired = (ts?: string) => {
+        if (!ts) return false;
+        return new Date(ts).getTime() < cutoff;
+      };
+
+      return {
+        evolutionEvents: s.evolutionEvents
+          .filter((ev) => !isExpired(ev.ts))
+          .slice(-EVENT_LIMITS.evolutionEvents),
+        taskRecords: s.taskRecords
+          .filter((r) => !isExpired(r.ts))
+          .slice(-EVENT_LIMITS.taskRecords),
+        socialMessages: s.socialMessages
+          .filter((m) => !isExpired(m.ts))
+          .slice(-EVENT_LIMITS.socialMessages),
+        agentDecisions: s.agentDecisions
+          .filter((d) => !isExpired(d.ts))
+          .slice(-EVENT_LIMITS.agentDecisions),
+      };
+    }),
 }));

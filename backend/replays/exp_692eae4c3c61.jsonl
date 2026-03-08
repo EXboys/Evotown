@@ -565,3 +565,36 @@
 {"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1341.014}
 {"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1344.305}
 {"type": "task_available", "task_id": "t_5", "task": "查询世界前5大城市人口并求平均", "difficulty": "medium", "created_at": "1772981151.78025", "replay_ts": 1348.24}
+{"type": "sprite_move", "agent_id": "agent_10", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1379.812}
+{"type": "task_taken", "task_id": "t_5", "agent_id": "agent_11", "task": "查询世界前5大城市人口并求平均", "replay_ts": 1389.065}
+{"type": "task_dispatched", "agent_id": "agent_11", "task": "查询世界前5大城市人口并求平均", "replay_ts": 1389.066}
+{"type": "agent_message", "from_id": "agent_11", "from_name": "关云长", "to_id": "agent_13", "to_name": "诸葛孔明", "content": "汝所言合则两利，共图大业，某深以为然。某虽勇武，亦需谋略。然某所图者，乃汉室兴衰，非区区军功也。若军师真心兴汉，某愿执青龙刀，与君共破曹贼，以全忠义。", "msg_type": "reply", "ts": "2026-03-08T14:46:39.628244+00:00", "replay_ts": 1396.089}
+{"type": "task_available", "task_id": "t_6", "task": "计算10!并验证结果的位数", "difficulty": "hard", "created_at": "1772981222.609044", "replay_ts": 1419.069}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1429.751}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1442.757}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1447.408}
+{"type": "sprite_move", "agent_id": "agent_12", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1482.358}
+{"type": "task_available", "task_id": "t_7", "task": "搜索三国时期主要战役并按年排序", "difficulty": "medium", "created_at": "1772981292.463389", "replay_ts": 1488.923}
+{"type": "task_complete", "agent_id": "agent_10", "success": true, "balance": 6, "judge": {"completion": 10, "quality": 10, "efficiency": 10, "reason": "回答准确且完全符合任务要求，格式清晰，没有冗余尝试。", "skipped": false, "total_score": 30, "reward": 5}, "task": "找出3个以B开头的国家首都", "difficulty": "medium", "replay_ts": 1509.058}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1538.641}
+{"type": "task_available", "task_id": "t_8", "task": "搜索三次工业革命时间并计算间隔", "difficulty": "medium", "created_at": "1772981382.480294", "replay_ts": 1578.94}
+{"type": "agent_message", "from_id": "agent_10", "from_name": "司马仲达", "to_id": "agent_12", "to_name": "周公瑾", "content": "公瑾雄烈，胆略兼人，然兵者诡道，宜静制动。唯忍辱负重方成大业，此乃吾多年征战之所悟。劝君勿急于求成，待敌疲弊，一击必杀。军功累积，非在逞强，而在谋定后动。", "msg_type": "strategy", "ts": "2026-03-08T14:50:09.297769+00:00", "replay_ts": 1605.759}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1621.775}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_calculator", "replay_ts": 1628.588}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_calculator", "replay_ts": 1630.46}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_calculator", "replay_ts": 1632.684}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_calculator", "replay_ts": 1633.83}
+{"type": "sprite_move", "agent_id": "agent_11", "from": "广场", "to": "技能工坊", "reason": "tool_calculator", "replay_ts": 1636.677}
+{"type": "task_complete", "agent_id": "agent_11", "success": true, "balance": 18, "judge": {"completion": 10, "quality": 9, "efficiency": 9, "reason": "回答准确完整，结构清晰，且合理利用工具完成任务。", "skipped": false, "total_score": 28, "reward": 5}, "task": "查询世界前5大城市人口并求平均", "difficulty": "medium", "replay_ts": 1647.673}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1649.723}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1673.615}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "档案馆", "reason": "tool_write_file", "replay_ts": 1699.614}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1703.228}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "档案馆", "reason": "tool_write_file", "replay_ts": 1713.354}
+{"type": "agent_message", "from_id": "agent_11", "from_name": "关云长", "to_id": "agent_13", "to_name": "诸葛孔明", "content": "军师勿忧，某观战场之势，宜先取弱小之敌以积军功。某家青龙刀下不斩无名，然为大局计，可诱敌深入，伏兵击之，必获全胜。", "msg_type": "strategy", "ts": "2026-03-08T14:51:57.404191+00:00", "replay_ts": 1713.867}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1718.698}
+{"type": "sprite_move", "agent_id": "agent_13", "from": "广场", "to": "技能工坊", "reason": "tool_run_command", "replay_ts": 1763.635}
+{"type": "task_complete", "agent_id": "agent_12", "success": true, "balance": 8, "judge": {"completion": 5, "quality": 5, "efficiency": 7, "reason": "任务超时，但多次尝试使用浏览器和HTTP请求工具未完成任务。", "skipped": false, "total_score": 17, "reward": 3}, "task": "比较曹魏/蜀汉/东吴疆域面积", "difficulty": "hard", "replay_ts": 1773.749}
+{"type": "agent_message", "from_id": "agent_12", "from_name": "周公瑾", "to_id": "agent_10", "to_name": "司马仲达", "content": "汝所云宜静制动，忍辱负重，诚为老谋。然吾功已八，皆取于进取。汝功未丰，故言保守。战机稍纵即逝，岂可坐待敌疲？望仲达勿以怯为谋也。", "msg_type": "reply", "ts": "2026-03-08T14:54:21.254298+00:00", "replay_ts": 1857.716}
+{"type": "sprite_move", "agent_id": "agent_12", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1875.711}
+{"type": "sprite_move", "agent_id": "agent_12", "from": "广场", "to": "图书馆", "reason": "tool_http_request", "replay_ts": 1882.204}

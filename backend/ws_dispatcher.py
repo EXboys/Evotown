@@ -176,6 +176,9 @@ class WsDispatcher:
     def pong(self) -> PongMsg:
         return {"type": "pong", "ts": datetime.now().isoformat()}
 
+    def server_ping(self) -> dict[str, str]:
+        return {"type": "server_ping", "ts": datetime.now().isoformat()}
+
     # ── 便捷广播方法（构建 + 发送）──────────────────────────────────────────────
 
     async def send_state_snapshot(self, agents: list[StateSnapshotAgent]) -> None:
