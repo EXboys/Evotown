@@ -1,5 +1,6 @@
 """Agent 业务服务"""
 import asyncio
+import json
 from pathlib import Path
 
 from core.config import load_economy_config
@@ -283,13 +284,26 @@ async def get_skill_content(agent_id: str, skill_name: str) -> dict | None:
 
 
 async def repair_skills_action(agent_id: str) -> tuple[bool, str]:
-    """重新从 arena_skills 部署所有内置技能到 agent 的 .skills 目录，修复损坏的符号链接。"""
+    """调用 skilllite evolution repair-skills 修复 agent 的 .skills 目录中的技能。"""
     a = arena.get_agent(agent_id)
     if not a:
         return False, "agent not found"
     agent_home = a.agent_home or a.chat_dir
-    ok, msg = process_mgr.repair_skills(agent_home)
+    ok, msg = await asyncio.to_thread(process_mgr.repair_skills, agent_home)
     return ok, msg
+
+
+async def repair_skills_stream(agent_id: str):
+    """流式执行 repair-skills，逐行 yield JSON 供前端实时展示进度。"""
+    a = arena.get_agent(agent_id)
+    if not a:
+        yield json.dumps({"t": "done", "ok": False, "error": "agent not found"}) + "\n"
+        return
+    agent_home = a.agent_home or a.chat_dir
+    async for line in process_mgr.repair_skills_stream(agent_home):
+        yield line + "\n"
+
+
 
 
 async def get_task_execution_detail(

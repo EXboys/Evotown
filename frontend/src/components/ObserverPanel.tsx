@@ -37,6 +37,8 @@ export function ObserverPanel() {
     "rules" | "skills" | "decisions" | "evolution" | "soul" | undefined
   >(undefined);
   const agents = useEvotownStore((s) => s.agents);
+  const repairStateByAgent = useEvotownStore((s) => s.repairStateByAgent);
+  const repairingAgentId = Object.entries(repairStateByAgent).find(([, s]) => s?.repairing)?.[0] ?? null;
   const selectedAgentId = useEvotownStore((s) => s.selectedAgentId);
   const evolutionEvents = useEvotownStore((s) => s.evolutionEvents);
   const setSelectedAgent = useEvotownStore((s) => s.setSelectedAgent);
@@ -211,6 +213,23 @@ export function ObserverPanel() {
 
   return (
     <div className="w-[min(380px,40%)] min-w-[260px] max-w-[420px] flex flex-col shrink-0 bg-[#1e293b] backdrop-blur-sm border-l border-slate-600/50 shadow-evo-panel relative">
+      {/* 修复中提示：切 tab 后仍可见，点击可回到该 Agent 技能页 */}
+      {repairingAgentId && (
+        <button
+          onClick={() => {
+            setTab("agents");
+            setSelectedAgent(repairingAgentId);
+            setAgentDetailInitialTab("skills");
+          }}
+          className="shrink-0 flex items-center gap-2 px-3 py-2 bg-sky-900/40 border-b border-sky-700/40 text-sky-300 text-xs hover:bg-sky-800/50 transition-colors"
+        >
+          <span className="animate-pulse">🔧</span>
+          <span className="truncate">
+            {agents.find((a) => a.id === repairingAgentId)?.display_name ?? repairingAgentId} 正在修复技能
+          </span>
+          <span className="text-slate-500 text-[10px] shrink-0">点击查看</span>
+        </button>
+      )}
       {/* 紧凑头部：观测面板 + 实验 ID */}
       <div className="px-3 py-3 sm:px-4 sm:py-3.5 border-b border-slate-600/50 shrink-0">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-2 min-w-0">

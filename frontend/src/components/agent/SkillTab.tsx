@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { adminFetch } from "../../hooks/useAdminToken";
+import { useEvotownStore } from "../../store/evotownStore";
 
-interface Skill {
+export interface Skill {
   name: string;
   status: string;
   description?: string;
@@ -25,17 +26,67 @@ export function SkillTab({ agentId, skills, onSkillsChange }: SkillTabProps) {
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [skillContent, setSkillContent] = useState<Record<string, SkillContent>>({});
   const [skillContentLoading, setSkillContentLoading] = useState<string | null>(null);
-  const [repairing, setRepairing] = useState(false);
-  const [repairMsg, setRepairMsg] = useState<string | null>(null);
+  const repairState = useEvotownStore((s) => s.repairStateByAgent[agentId]) ?? {
+    repairing: false,
+    log: [] as string[],
+    msg: null as string | null,
+  };
+  const setRepairState = useEvotownStore((s) => s.setRepairState);
+  const appendRepairLog = useEvotownStore((s) => s.appendRepairLog);
+  const { repairing, log: repairLog, msg: repairMsg } = repairState;
 
   const handleRepair = async () => {
-    setRepairing(true);
-    setRepairMsg(null);
+    setRepairState(agentId, { repairing: true, log: [], msg: null });
     try {
-      const res = await adminFetch(`/agents/${agentId}/repair-skills`, { method: "POST" });
-      const data = await res.json();
-      setRepairMsg(data.ok ? "✅ 修复完成" : `❌ ${data.error ?? "修复失败"}`);
-      if (data.ok) {
+      const res = await adminFetch(`/agents/${agentId}/repair-skills/stream`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setRepairState(agentId, { repairing: false, msg: `❌ ${(data as { error?: string }).error ?? "请求失败"}` });
+        return;
+      }
+      const reader = res.body?.getReader();
+      if (!reader) {
+        setRepairState(agentId, { repairing: false, msg: "❌ 无法读取流" });
+        return;
+      }
+      const decoder = new TextDecoder();
+      let buf = "";
+      let ok = false;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const obj = JSON.parse(line) as { t?: string; m?: string; ok?: boolean; error?: string };
+            if (obj.t === "log" && obj.m != null) {
+              appendRepairLog(agentId, obj.m);
+            } else if (obj.t === "done") {
+              ok = obj.ok === true;
+              const msg = ok ? "✅ 修复完成" : `❌ ${obj.error ?? "修复失败"}`;
+              setRepairState(agentId, { repairing: false, msg });
+            }
+      } catch {
+        appendRepairLog(agentId, line);
+      }
+        }
+      }
+      if (buf.trim()) {
+        try {
+          const obj = JSON.parse(buf) as { t?: string; ok?: boolean; error?: string };
+          if (obj.t === "done") {
+            ok = obj.ok === true;
+            setRepairState(agentId, { repairing: false, msg: ok ? "✅ 修复完成" : `❌ ${obj.error ?? "修复失败"}` });
+          }
+        } catch {
+          appendRepairLog(agentId, buf);
+        }
+      }
+      if (ok) {
+        setSkillContent({});
         const sRes = await fetch(`/agents/${agentId}/skills`);
         const skillsRaw = (await sRes.json()) as unknown[];
         onSkillsChange(
@@ -47,9 +98,9 @@ export function SkillTab({ agentId, skills, onSkillsChange }: SkillTabProps) {
         );
       }
     } catch {
-      setRepairMsg("❌ 请求失败");
+      setRepairState(agentId, { repairing: false, msg: "❌ 请求失败" });
     } finally {
-      setRepairing(false);
+      setRepairState(agentId, { repairing: false });
     }
   };
 
@@ -101,16 +152,28 @@ export function SkillTab({ agentId, skills, onSkillsChange }: SkillTabProps) {
           onClick={handleRepair}
           disabled={repairing}
           className="px-2 py-1 text-[10px] font-medium rounded bg-sky-600/20 text-sky-400 border border-sky-600/30 hover:bg-sky-600/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title="重新从 arena_skills 部署技能依赖，修复损坏的符号链接"
+          title="测试每个技能，失败时由 LLM 修复（skilllite evolution repair-skills）"
         >
           {repairing ? "修复中…" : "🔧 修复技能"}
         </button>
       </div>
 
-      {repairMsg && (
-        <p className="text-[11px] px-2 py-1 rounded bg-slate-800/50 text-slate-300 border border-slate-600/40">
-          {repairMsg}
-        </p>
+      {(repairing || repairLog.length > 0 || repairMsg) && (
+        <div className="rounded bg-slate-800/50 border border-slate-600/40 overflow-hidden">
+          {repairLog.length > 0 && (
+            <pre className="text-[10px] text-slate-300 px-2 py-1.5 max-h-32 overflow-y-auto font-mono whitespace-pre-wrap break-words">
+              {repairLog.join("\n")}
+            </pre>
+          )}
+          {repairMsg && (
+            <p className="text-[11px] px-2 py-1 text-slate-200 font-medium border-t border-slate-600/40">
+              {repairMsg}
+            </p>
+          )}
+          {repairing && repairLog.length === 0 && !repairMsg && (
+            <p className="text-[11px] px-2 py-1 text-slate-400">正在启动 skilllite，请稍候…</p>
+          )}
+        </div>
       )}
 
       {skills.length === 0 ? (

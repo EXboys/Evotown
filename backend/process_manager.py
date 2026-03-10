@@ -10,7 +10,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 logger = logging.getLogger("evotown.process")
 
@@ -797,44 +797,101 @@ REFUSE
             return False
 
     def repair_skills(self, agent_home: str) -> tuple[bool, str]:
-        """从 arena_skills 重新部署所有技能到 agent 的 .skills 目录，修复损坏的符号链接。
+        """调用 skilllite evolution repair-skills 修复 agent 的 .skills 目录中的技能。
 
-        - 已存在的技能：仅替换 node_modules（保留进化产物 _evolved/）
-        - 缺失的技能：整体复制
-        所有复制均使用 symlinks=True，确保 node_modules/.bin 中的符号链接完整。
+        不覆盖、不同步 arena_skills；仅对 agent 已有的技能做测试，失败时由 LLM 修复。
         """
-        arena_skills = Path(__file__).resolve().parent / "arena_skills"
-        if not arena_skills.exists():
-            return False, f"arena_skills source not found at {arena_skills}"
+        # 防御：若误传 chat_dir（以 /chat 结尾），修正为 agent_home
+        if agent_home.rstrip("/").endswith("/chat"):
+            fixed = str(Path(agent_home).parent)
+            logger.warning(
+                "repair_skills: agent_home ends with /chat, fixing %s -> %s",
+                agent_home, fixed,
+            )
+            agent_home = fixed
+        evolve_env = {**os.environ}
+        if evolve_env.get("API_KEY"):
+            evolve_env["OPENAI_API_KEY"] = evolve_env["API_KEY"]
+            evolve_env["SKILLLITE_API_KEY"] = evolve_env["API_KEY"]
+        if evolve_env.get("BASE_URL"):
+            evolve_env["OPENAI_BASE_URL"] = evolve_env["BASE_URL"]
+            evolve_env["SKILLLITE_API_BASE"] = evolve_env["BASE_URL"]
+        if evolve_env.get("MODEL"):
+            evolve_env["OPENAI_MODEL"] = evolve_env["MODEL"]
+            evolve_env["SKILLLITE_MODEL"] = evolve_env["MODEL"]
+        evolve_env["SKILLLITE_WORKSPACE"] = agent_home
+        try:
+            result = subprocess.run(
+                ["skilllite", "evolution", "repair-skills"],
+                env=evolve_env,
+                cwd=agent_home,
+                capture_output=True,
+                timeout=300,
+                text=True,
+            )
+            out = (result.stdout or "") + (result.stderr or "")
+            ok = result.returncode == 0
+            msg = out.strip() if out else ("修复完成" if ok else "修复失败")
+            logger.info("[%s] repair_skills: %s", agent_home, msg[:300])
+            return ok, msg
+        except subprocess.TimeoutExpired:
+            return False, "skilllite repair-skills 超时"
+        except FileNotFoundError:
+            return False, "skilllite 未找到，请确保已安装"
+        except Exception as e:
+            return False, str(e)[:200]
 
-        skills_dir = Path(agent_home) / ".skills"
-        skills_dir.mkdir(parents=True, exist_ok=True)
-
-        repaired: list[str] = []
-        for skill_src in sorted(arena_skills.iterdir()):
-            if not skill_src.is_dir() or not (skill_src / "SKILL.md").exists():
-                continue
-            skill_name = skill_src.name
-            skill_dst = skills_dir / skill_name
-
-            if skill_dst.exists():
-                # 只替换 node_modules，保留进化产物
-                nm_src = skill_src / "node_modules"
-                nm_dst = skill_dst / "node_modules"
-                if nm_src.exists():
-                    if nm_dst.exists():
-                        shutil.rmtree(nm_dst)
-                    shutil.copytree(nm_src, nm_dst, symlinks=True)
-                    repaired.append(f"{skill_name}: node_modules restored")
-                else:
-                    repaired.append(f"{skill_name}: no node_modules in source, skipped")
-            else:
-                shutil.copytree(skill_src, skill_dst, symlinks=True)
-                repaired.append(f"{skill_name}: copied (was missing)")
-
-        msg = "\n".join(repaired) if repaired else "No skills found in arena_skills"
-        logger.info("[%s] repair_skills done: %s", agent_home, repaired)
-        return True, msg
+    async def repair_skills_stream(self, agent_home: str) -> AsyncIterator[str]:
+        """流式执行 skilllite repair-skills，逐行 yield 输出，便于前端展示进度。"""
+        if agent_home.rstrip("/").endswith("/chat"):
+            agent_home = str(Path(agent_home).parent)
+        evolve_env = {**os.environ}
+        if evolve_env.get("API_KEY"):
+            evolve_env["OPENAI_API_KEY"] = evolve_env["API_KEY"]
+            evolve_env["SKILLLITE_API_KEY"] = evolve_env["API_KEY"]
+        if evolve_env.get("BASE_URL"):
+            evolve_env["OPENAI_BASE_URL"] = evolve_env["BASE_URL"]
+            evolve_env["SKILLLITE_API_BASE"] = evolve_env["BASE_URL"]
+        if evolve_env.get("MODEL"):
+            evolve_env["OPENAI_MODEL"] = evolve_env["MODEL"]
+            evolve_env["SKILLLITE_MODEL"] = evolve_env["MODEL"]
+        evolve_env["SKILLLITE_WORKSPACE"] = agent_home
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "skilllite",
+                "evolution",
+                "repair-skills",
+                env=evolve_env,
+                cwd=agent_home,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            buf = b""
+            while True:
+                chunk = await proc.stdout.read(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, _, buf = buf.partition(b"\n")
+                    if line:
+                        try:
+                            yield json.dumps({"t": "log", "m": line.decode("utf-8", errors="replace").rstrip()})
+                        except Exception:
+                            pass
+            if buf:
+                try:
+                    yield json.dumps({"t": "log", "m": buf.decode("utf-8", errors="replace").rstrip()})
+                except Exception:
+                    pass
+            ret = await proc.wait()
+            yield json.dumps({"t": "done", "ok": ret == 0})
+        except FileNotFoundError:
+            yield json.dumps({"t": "done", "ok": False, "error": "skilllite 未找到，请确保已安装"})
+        except asyncio.TimeoutError:
+            yield json.dumps({"t": "done", "ok": False, "error": "修复超时"})
+        except Exception as e:
+            yield json.dumps({"t": "done", "ok": False, "error": str(e)[:200]})
 
     async def trigger_evolve(self, agent_id: str, agent_home: str) -> tuple[bool, str]:
         """主动触发进化: skilllite evolution run，使用该 agent 独立的 .skills

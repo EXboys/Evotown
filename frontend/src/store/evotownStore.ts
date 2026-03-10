@@ -140,6 +140,8 @@ interface EvotownState {
   socialMessages: SocialMessage[];
   /** Agent 自主决策记录 */
   agentDecisions: AgentDecision[];
+  /** 技能修复状态（按 agentId），切 tab 后回来仍可见 */
+  repairStateByAgent: Record<string, { repairing: boolean; log: string[]; msg: string | null }>;
 
   /** 手动触发过期数据清理 */
   cleanupExpiredEvents: () => void;
@@ -171,6 +173,9 @@ interface EvotownState {
   setExperimentInfo: (info: ExperimentInfo) => void;
   pushSocialMessage: (msg: SocialMessage) => void;
   pushAgentDecision: (dec: AgentDecision) => void;
+  setRepairState: (agentId: string, state: Partial<{ repairing: boolean; log: string[]; msg: string | null }>) => void;
+  appendRepairLog: (agentId: string, line: string) => void;
+  getRepairState: (agentId: string) => { repairing: boolean; log: string[]; msg: string | null };
 }
 
 export const useEvotownStore = create<EvotownState>((set, get) => ({
@@ -186,6 +191,7 @@ export const useEvotownStore = create<EvotownState>((set, get) => ({
   replayMode: false,
   socialMessages: [],
   agentDecisions: [],
+  repairStateByAgent: {},
 
   setReplayMode: (mode) => set({ replayMode: mode }),
   setAgentTeams: (teams) =>
@@ -305,6 +311,26 @@ export const useEvotownStore = create<EvotownState>((set, get) => ({
     set((s) => ({
       agentDecisions: [...s.agentDecisions, dec].slice(-EVENT_LIMITS.agentDecisions),
     })),
+
+  setRepairState: (agentId, partial) =>
+    set((s) => {
+      const prev = s.repairStateByAgent[agentId] ?? { repairing: false, log: [], msg: null };
+      const next: { repairing: boolean; log: string[]; msg: string | null } = {
+        ...prev,
+        ...(partial.repairing !== undefined && { repairing: partial.repairing }),
+        ...(partial.msg !== undefined && { msg: partial.msg }),
+      };
+      if (partial.log !== undefined) next.log = partial.log;
+      return { repairStateByAgent: { ...s.repairStateByAgent, [agentId]: next } };
+    }),
+  appendRepairLog: (agentId, line) =>
+    set((s) => {
+      const prev = s.repairStateByAgent[agentId] ?? { repairing: true, log: [], msg: null };
+      const next = { ...prev, log: [...prev.log, line] };
+      return { repairStateByAgent: { ...s.repairStateByAgent, [agentId]: next } };
+    }),
+  getRepairState: (agentId) =>
+    get().repairStateByAgent[agentId] ?? { repairing: false, log: [], msg: null },
 
   /** 清理过期事件数据 */
   cleanupExpiredEvents: () =>

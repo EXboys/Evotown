@@ -1,5 +1,6 @@
 """Agent 路由"""
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from core.auth import require_admin, validate_soul_content
 from domain.models import AgentCreate
@@ -79,11 +80,21 @@ async def get_skill_content(agent_id: str, skill_name: str):
 
 @router.post("/{agent_id}/repair-skills", dependencies=[Depends(require_admin)])
 async def repair_agent_skills(agent_id: str):
-    """重新从 arena_skills 部署内置技能，修复损坏的符号链接或缺失的技能目录。"""
+    """调用 skilllite evolution repair-skills 修复 agent 的 .skills 中的技能（测试 + LLM 修复）。"""
     ok, msg = await agent_service.repair_skills_action(agent_id)
     if not ok:
         return {"ok": False, "error": msg}
     return {"ok": True, "message": msg}
+
+
+@router.post("/{agent_id}/repair-skills/stream", dependencies=[Depends(require_admin)])
+async def repair_agent_skills_stream(agent_id: str):
+    """流式执行 repair-skills，实时返回 skilllite 输出，便于前端展示进度和日志。"""
+    return StreamingResponse(
+        agent_service.repair_skills_stream(agent_id),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{agent_id}/skills/{skill_name}/confirm", dependencies=[Depends(require_admin)])
