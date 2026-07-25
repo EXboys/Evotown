@@ -124,6 +124,25 @@ const STATUS_META: Record<AgentRun["status"], { label: string; className: string
   cancelled: { label: "已取消", className: "border-slate-200 bg-slate-50 text-slate-600", dot: "bg-slate-400" },
 };
 
+const COMPLETED_WITH_ERRORS_META = {
+  label: "完成（有工具错误）",
+  className: "border-amber-200 bg-amber-50 text-amber-800",
+  dot: "bg-amber-500",
+};
+
+function runHasToolErrors(run: Pick<AgentRun, "status" | "signals">): boolean {
+  if (run.status !== "succeeded") return false;
+  const signals = run.signals || {};
+  if (signals.completion_status === "completed_with_errors") return true;
+  return Array.isArray(signals.tool_errors) && signals.tool_errors.length > 0;
+}
+
+function toolErrorSummary(run: Pick<AgentRun, "signals">): string {
+  const errors = run.signals?.tool_errors;
+  if (!Array.isArray(errors) || !errors.length) return "";
+  return errors.map((item) => String(item)).filter(Boolean).slice(0, 3).join("；");
+}
+
 function Badge({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}>
@@ -827,7 +846,15 @@ export function CodingAgentChatPage() {
   }, [agentId, runChain.map((r) => `${runAttachmentPaths(r).join(",")}|${r.artifact_manifest?.map((a) => a.path).join(",") || ""}`).join(";")]);
 
   // Sessions — loaded from dedicated endpoint (not computed from paginated runs)
-  type Session = { id: string; prompt: string; count: number; lastAt: string; lastStatus: AgentRun["status"] };
+  type Session = {
+    id: string;
+    prompt: string;
+    count: number;
+    lastAt: string;
+    lastStatus: AgentRun["status"];
+    lastCompletionStatus?: string;
+    lastToolErrors?: string[];
+  };
   const [sessions, setSessions] = useState<Session[]>([]);
   const refreshSessions = useCallback(() => {
     if (!agentId) return;
@@ -1074,7 +1101,18 @@ export function CodingAgentChatPage() {
                         <div key={session.id} className={`flex items-stretch gap-0.5 rounded-lg border transition ${isActive ? "border-slate-300 bg-white" : "border-transparent hover:bg-slate-100"}`}>
                           <button type="button" onClick={() => { if (!isEditing) setSelectedRunId(session.id); }} className="min-w-0 flex-1 rounded-lg px-2.5 py-1.5 text-left">
                             <div className="flex items-center gap-1.5">
-                              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_META[session.lastStatus].dot}`} />
+                              <span
+                                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                  session.lastStatus === "succeeded" && session.lastCompletionStatus === "completed_with_errors"
+                                    ? COMPLETED_WITH_ERRORS_META.dot
+                                    : (STATUS_META[session.lastStatus] || STATUS_META.queued).dot
+                                }`}
+                                title={
+                                  session.lastStatus === "succeeded" && session.lastCompletionStatus === "completed_with_errors"
+                                    ? COMPLETED_WITH_ERRORS_META.label
+                                    : (STATUS_META[session.lastStatus] || STATUS_META.queued).label
+                                }
+                              />
                               {isEditing ? (
                                 <input
                                   type="text"
@@ -1318,7 +1356,13 @@ export function CodingAgentChatPage() {
                                   );
                                 });
                               })()}
-                              {!runRunning && run.status === "succeeded" && (
+                              {!runRunning && run.status === "succeeded" && runHasToolErrors(run) && (
+                                <div className="rounded-xl border border-amber-200 bg-amber-50/50 px-3 py-2 text-xs text-amber-800">
+                                  ⚠️ 对话已完成，但有工具错误
+                                  {toolErrorSummary(run) ? `：${toolErrorSummary(run).slice(0, 200)}` : ""}
+                                </div>
+                              )}
+                              {!runRunning && run.status === "succeeded" && !runHasToolErrors(run) && (
                                 <div className="rounded-xl border border-green-200 bg-green-50/50 px-3 py-2 text-xs text-green-700">✅ 执行完成</div>
                               )}
                               {!runRunning && run.status === "failed" && (

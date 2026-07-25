@@ -422,6 +422,73 @@ def _result_summary_from_output(output: str, *, vision_text: str = "") -> str:
     return text[:8000]
 
 
+_NON_SUBSTANTIVE_ASSISTANT_PREFIXES = (
+    "[Claude Agent started",
+    "Claude Agent SDK run completed.",
+    "Claude Code runner completed.",
+)
+
+
+def _assistant_event_text(payload: dict[str, Any] | None) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("text") or payload.get("summary") or "").strip()
+
+
+def _is_substantive_assistant_text(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return False
+    return not any(cleaned.startswith(prefix) for prefix in _NON_SUBSTANTIVE_ASSISTANT_PREFIXES)
+
+
+def _collect_tool_errors(events: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        if event.get("event_type") != "tool_result":
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        if not payload.get("is_error"):
+            continue
+        content = str(payload.get("content") or "").strip()[:200]
+        if not content or content in seen:
+            continue
+        seen.add(content)
+        errors.append(content)
+    return errors
+
+
+def derive_run_completion(
+    *,
+    exit_code: int,
+    events: list[dict[str, Any]],
+) -> tuple[str, str, list[str]]:
+    """Map exit_code + events → (status, completion_status, tool_errors).
+
+    REQ-018 / #195: non-zero exit with a final assistant reply is still
+    ``succeeded``, with ``completion_status=completed_with_errors``.
+    Timeout / cancel paths must not call this helper.
+    """
+    tool_errors = _collect_tool_errors(events)
+    has_assistant = any(
+        event.get("event_type") == "assistant_message"
+        and _is_substantive_assistant_text(_assistant_event_text(event.get("payload")))
+        for event in events
+    )
+
+    if exit_code == 0:
+        if tool_errors:
+            return "succeeded", "completed_with_errors", tool_errors
+        return "succeeded", "succeeded", []
+
+    if has_assistant:
+        errors = tool_errors or ["tool call failed (non-zero exit)"]
+        return "succeeded", "completed_with_errors", errors
+
+    return "failed", "failed", tool_errors
+
+
 def _write_conversation_context(
     workspace: dict[str, Any],
     previous_run_id: str,
@@ -1105,7 +1172,6 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
         )
         return updated or run
 
-    status = "succeeded" if exit_code == 0 else "failed"
     summary = _result_summary_from_output(output, vision_text=vision_text)
 
     # Scan workspace for new files created by the Agent
@@ -1141,15 +1207,24 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
             {"warning": "invalid EVOTOWN_ARTIFACT_SORT_RULES; using defaults", "detail": sort_warning},
         )
 
+    # REQ-018: exit_code≠0 with a final assistant reply is succeeded + tool_errors,
+    # not a hard failed (e.g. MCP permission denied after the model already answered).
+    events = claude_agent_runs.list_events(run_id, limit=1000)
+    status, completion_status, tool_errors = derive_run_completion(
+        exit_code=exit_code,
+        events=events,
+    )
+
     # Streaming already wrote assistant_message events — do not append the full
     # summary again (that duplicated the answer in the chat UI). On failure with
     # no streamed text, keep a terminal error event for the UI.
     has_streamed_assistant = any(
         e.get("event_type") == "assistant_message"
-        for e in claude_agent_runs.list_events(run_id, limit=1000)
+        and _is_substantive_assistant_text(_assistant_event_text(e.get("payload")))
+        for e in events
     )
     if status == "succeeded":
-        if not has_streamed_assistant:
+        if not has_streamed_assistant and _is_substantive_assistant_text(summary):
             claude_agent_runs.append_event(
                 run_id,
                 "assistant_message",
@@ -1180,6 +1255,8 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
             "mcp_connection_count": len(shared_context.get("mcp", {}).get("connections", [])),
             "knowledge_result_count": len(shared_context.get("knowledge", {}).get("results", [])),
             "vision_model": workspace_vision.vision_model_name() if vision_text else "",
+            "completion_status": completion_status,
+            **({"tool_errors": tool_errors} if tool_errors else {}),
             **({"vision_analysis": vision_text[:8000]} if vision_text and not vision_text.startswith("[视觉分析不可用") else {}),
         },
     )

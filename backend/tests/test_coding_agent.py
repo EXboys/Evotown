@@ -652,6 +652,75 @@ class CodingAgentApiTest(unittest.TestCase):
         )
         self.assertEqual(opts.status_code, 200)
 
+    def test_runner_marks_succeeded_when_assistant_replied_despite_tool_error(self) -> None:
+        from infra import claude_agent_runs, agents
+        from services import claude_code_runner
+
+        async def fake_run(*, workspace_root, prompt, run, model, runtime_engine="claude", context=None, on_message=None):
+            del workspace_root, prompt, model, runtime_engine, context
+            run_id = run["run_id"]
+            claude_agent_runs.append_event(
+                run_id,
+                "assistant_message",
+                {"text": "无法调用 MCP，请检查权限。"},
+            )
+            claude_agent_runs.append_event(
+                run_id,
+                "tool_result",
+                {"content": "MCP permission denied for weather", "is_error": True},
+            )
+            if on_message:
+                on_message("无法调用 MCP，请检查权限。")
+            return 1, "无法调用 MCP，请检查权限。", "", "cli"
+
+        account, _secret = self._account_key("CompletionUser")
+        ws = agents.create_agent(account_id=account["account_id"], name="Completion Sandbox")
+        run = claude_agent_runs.create_run(
+            agent_id=ws["agent_id"],
+            account_id=account["account_id"],
+            prompt="查天气",
+            model="claude-test",
+        )
+        run_id = run["run_id"]
+
+        with patch("services.claude_code_runner._run_agent", new=AsyncMock(side_effect=fake_run)):
+            updated = asyncio.run(claude_code_runner.run_claude_agent(run_id))
+
+        self.assertEqual(updated["status"], "succeeded")
+        self.assertEqual(updated["signals"]["completion_status"], "completed_with_errors")
+        self.assertIn("MCP permission denied", updated["signals"]["tool_errors"][0])
+        self.assertEqual(updated.get("error") or "", "")
+
+        # Sessions API exposes completion_status for the chat history badge.
+        stored = claude_agent_runs.get_run(run_id)
+        assert stored is not None
+        last_signals = stored.get("signals") or {}
+        self.assertEqual(last_signals.get("completion_status"), "completed_with_errors")
+        self.assertTrue(last_signals.get("tool_errors"))
+
+    def test_runner_keeps_failed_when_no_assistant_reply(self) -> None:
+        from infra import claude_agent_runs, agents
+        from services import claude_code_runner
+
+        async def fake_run(*, workspace_root, prompt, run, model, runtime_engine="claude", context=None, on_message=None):
+            del workspace_root, prompt, run, model, runtime_engine, context, on_message
+            return 1, "process crashed", "", "cli"
+
+        account, _secret = self._account_key("FailUser")
+        ws = agents.create_agent(account_id=account["account_id"], name="Fail Sandbox")
+        run = claude_agent_runs.create_run(
+            agent_id=ws["agent_id"],
+            account_id=account["account_id"],
+            prompt="crash please",
+            model="claude-test",
+        )
+
+        with patch("services.claude_code_runner._run_agent", new=AsyncMock(side_effect=fake_run)):
+            updated = asyncio.run(claude_code_runner.run_claude_agent(run["run_id"]))
+
+        self.assertEqual(updated["status"], "failed")
+        self.assertEqual(updated["signals"]["completion_status"], "failed")
+
 
 class ClaudeRunModelResolveTest(unittest.TestCase):
     def test_resolve_run_model_prefers_explicit(self) -> None:
@@ -725,6 +794,51 @@ class AppendLogExcerptTest(unittest.TestCase):
         stored = claude_agent_runs.get_run(rid)
         assert stored is not None
         self.assertEqual(stored.get("log_excerpt") or "", "")
+
+
+class RunCompletionDeriveTest(unittest.TestCase):
+    """REQ-018 / #195 pure unit cases for derive_run_completion."""
+
+    def test_derive_exit_zero_succeeded(self) -> None:
+        from services.claude_code_runner import derive_run_completion
+
+        status, completion, errors = derive_run_completion(
+            exit_code=0,
+            events=[{"event_type": "assistant_message", "payload": {"text": "all good"}}],
+        )
+        self.assertEqual(status, "succeeded")
+        self.assertEqual(completion, "succeeded")
+        self.assertEqual(errors, [])
+
+    def test_derive_exit_nonzero_with_assistant_completed_with_errors(self) -> None:
+        from services.claude_code_runner import derive_run_completion
+
+        status, completion, errors = derive_run_completion(
+            exit_code=1,
+            events=[
+                {"event_type": "assistant_message", "payload": {"text": "I tried MCP but lacked permission."}},
+                {
+                    "event_type": "tool_result",
+                    "payload": {"content": "MCP permission denied", "is_error": True},
+                },
+            ],
+        )
+        self.assertEqual(status, "succeeded")
+        self.assertEqual(completion, "completed_with_errors")
+        self.assertEqual(errors, ["MCP permission denied"])
+
+    def test_derive_exit_nonzero_without_assistant_failed(self) -> None:
+        from services.claude_code_runner import derive_run_completion
+
+        status, completion, errors = derive_run_completion(
+            exit_code=1,
+            events=[
+                {"event_type": "tool_result", "payload": {"content": "crash", "is_error": True}},
+            ],
+        )
+        self.assertEqual(status, "failed")
+        self.assertEqual(completion, "failed")
+        self.assertEqual(errors, ["crash"])
 
 
 class ClaudeSdkResumeFallbackTest(unittest.TestCase):
