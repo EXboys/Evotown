@@ -174,6 +174,35 @@ class MarketApiTest(unittest.TestCase):
         else:
             self.fail("expected seeded http-request in manifest")
 
+    def test_market_manifest_aliases_claude_code_to_openclaw(self) -> None:
+        from fastapi.testclient import TestClient
+        import importlib
+        import main
+
+        importlib.reload(main)
+        client = TestClient(main.app)
+        admin = {"X-Admin-Token": "test-admin-token"}
+        account = client.post(
+            "/api/v1/accounts",
+            json={"name": "Alias User", "team_id": "default", "owner_email": "alias@example.com"},
+            headers=admin,
+        )
+        self.assertEqual(account.status_code, 200)
+        account_id = account.json()["account"]["account_id"]
+        key_resp = client.post(
+            f"/api/v1/accounts/{account_id}/keys",
+            json={"label": "employee", "scopes": ["gateway.chat", "console.read"]},
+            headers=admin,
+        )
+        self.assertEqual(key_resp.status_code, 200)
+        api_key = key_resp.json()["secret"]
+        via_alias = client.get(
+            "/api/v1/market/bundles/default-agent-skills/manifest?runtime_target=claude-code",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        self.assertEqual(via_alias.status_code, 200)
+        self.assertEqual(via_alias.json()["manifest"]["bundle_id"], "default-agent-skills")
+
     def test_market_downloads_builtin_seed_skill(self) -> None:
         from fastapi.testclient import TestClient
         import importlib
