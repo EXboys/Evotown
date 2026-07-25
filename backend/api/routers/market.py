@@ -6,7 +6,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
-from core.auth import require_console_read, require_staff_session
+from core.auth import require_console_read
 from infra import skill_market
 
 router = APIRouter(prefix="/api/v1/market", tags=["skills-market"])
@@ -60,8 +60,14 @@ async def get_market_bundle_manifest(
     bundle_id: str,
     channel: str = "stable",
     runtime_target: str | None = None,
-    session: dict = Depends(require_staff_session),
+    session: dict | None = Depends(require_console_read),
 ):
+    """Employee Agent Doctor sync uses evk_ + console.read; staff sessions also work."""
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in with a console API key (evk_) or staff session to fetch skill bundles.",
+        )
     manifest = skill_market.get_bundle_manifest(
         bundle_id,
         channel=channel,
