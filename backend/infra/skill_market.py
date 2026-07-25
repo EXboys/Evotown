@@ -26,6 +26,25 @@ from infra import skill_signing
 
 logger = logging.getLogger(__name__)
 
+# Job/dispatch runtimes (Agent Doctor preferred) vs Skill package families.
+# Map the former onto a market package target so employee sync keeps working.
+_MARKET_RUNTIME_ALIASES = {
+    "claude": "openclaw",
+    "claude-code": "openclaw",
+    "claudecode": "openclaw",
+    "codex": "openclaw",
+}
+
+
+def normalize_market_runtime_target(runtime_target: str | None) -> str | None:
+    if runtime_target is None:
+        return None
+    key = runtime_target.strip().lower().replace("_", "-")
+    if not key:
+        return None
+    return _MARKET_RUNTIME_ALIASES.get(key, key)
+
+
 _backend_dir = Path(__file__).resolve().parent.parent
 _arena_skills_dir = _backend_dir / "arena_skills"
 _custom_skills_dir = _backend_dir / "data" / "custom-skills"
@@ -681,7 +700,8 @@ def get_bundle_manifest(
         return None
     item = dict(row)
     runtime_targets = _json_loads(item.get("runtime_targets", "[]"), [])
-    if runtime_target and runtime_target not in runtime_targets:
+    effective_runtime = normalize_market_runtime_target(runtime_target)
+    if effective_runtime and effective_runtime not in runtime_targets:
         return None
     manifest_skills = _json_loads(item.get("skills", "[]"), [])
     approved_skills = [
@@ -741,8 +761,9 @@ def list_skills(
         params,
     ).fetchall()
     result = [_skill_from_row(row) for row in rows]
-    if runtime_target:
-        result = [item for item in result if runtime_target in item["runtime_targets"]]
+    effective_runtime = normalize_market_runtime_target(runtime_target)
+    if effective_runtime:
+        result = [item for item in result if effective_runtime in item["runtime_targets"]]
     if tag:
         result = [item for item in result if tag in item["tags"]]
     return result
