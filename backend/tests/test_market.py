@@ -104,7 +104,7 @@ class MarketApiTest(unittest.TestCase):
         detail_after = client.get("/api/v1/market/skills/market-demo")
         self.assertEqual(detail_after.json()["skill"]["download_count"], 1)
 
-    def test_market_manifest_requires_staff_session(self) -> None:
+    def test_market_manifest_accepts_console_read_or_staff_session(self) -> None:
         from fastapi.testclient import TestClient
         import importlib
         import main
@@ -118,7 +118,7 @@ class MarketApiTest(unittest.TestCase):
         )
         self.assertEqual(unauth.status_code, 401)
 
-        # API keys are not enough — manifest requires a staff session.
+        # Employee Agent Doctor sync uses evk_ + console.read.
         admin = {"X-Admin-Token": "test-admin-token"}
         account = client.post(
             "/api/v1/accounts",
@@ -134,11 +134,14 @@ class MarketApiTest(unittest.TestCase):
         )
         self.assertEqual(key_resp.status_code, 200)
         api_key = key_resp.json()["secret"]
-        denied_key = client.get(
+        via_key = client.get(
             "/api/v1/market/bundles/default-agent-skills/manifest?runtime_target=hermes",
             headers={"Authorization": f"Bearer {api_key}"},
         )
-        self.assertEqual(denied_key.status_code, 401)
+        self.assertEqual(via_key.status_code, 200)
+        body = via_key.json()["manifest"]
+        self.assertEqual(body["bundle_id"], "default-agent-skills")
+        self.assertGreaterEqual(len(body["skills"]), 1)
 
         accounts_store.create_account(
             name="Manifest Staff",
