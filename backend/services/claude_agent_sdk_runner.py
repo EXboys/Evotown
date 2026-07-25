@@ -222,9 +222,27 @@ class ClaudeCodeRunner:
                         if text:
                             _emit(str(text))
                 elif isinstance(message, ResultMessage):
+                    # Tool / MCP failures belong in tool_result events, not assistant text
+                    # (REQ-018: conversation may still have completed successfully).
                     if getattr(message, "errors", None):
+                        from infra import claude_agent_runs
+
                         for item in message.errors:
-                            _emit(str(item))
+                            err_text = str(item).strip()
+                            if not err_text:
+                                continue
+                            try:
+                                claude_agent_runs.append_event(
+                                    context.run_id,
+                                    "tool_result",
+                                    {"content": err_text[:300], "is_error": True},
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "failed to append tool_result error for run %s",
+                                    context.run_id,
+                                    exc_info=True,
+                                )
                     if message.subtype == "success" and not message.is_error:
                         exit_code = 0
                     else:

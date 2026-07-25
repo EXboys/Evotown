@@ -668,12 +668,15 @@ async def list_agent_sessions(agent_id: str, identity: dict | None = Depends(req
         chain.sort(key=lambda r: r["created_at"])
         first = chain[0]
         last = chain[-1]
+        last_signals = last.get("signals") if isinstance(last.get("signals"), dict) else {}
         sessions.append({
             "id": root_id,
             "prompt": first.get("prompt", ""),
             "count": len(chain),
             "lastAt": last.get("created_at", ""),
             "lastStatus": last.get("status", ""),
+            "lastCompletionStatus": str(last_signals.get("completion_status") or ""),
+            "lastToolErrors": list(last_signals.get("tool_errors") or [])[:5],
         })
     sessions.sort(key=lambda s: s["lastAt"], reverse=True)
     return {"sessions": sessions}
