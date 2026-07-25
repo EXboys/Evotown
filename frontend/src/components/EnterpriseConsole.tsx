@@ -52,6 +52,15 @@ type EngineRecord = {
   online?: boolean;
   last_seen_at?: string;
   connector_version?: string;
+  online_meta?: {
+    channel?: string;
+    inventory_summary?: {
+      preferred_runtime?: string;
+      preferred_runtime_installed?: boolean;
+      installed?: string[];
+      runtimes?: Array<{ id?: string; installed?: boolean; version?: string | null }>;
+    };
+  };
 };
 
 type ExternalRun = {
@@ -984,6 +993,9 @@ function EngineCard({ engine, runs, violations }: { engine: EngineRecord; runs: 
   const meta = ENGINE_META[engine.engine_type] ?? ENGINE_META.custom;
   const count = runs.filter((run) => run.engine_id === engine.engine_id).length;
   const risk = violations.filter((item) => item.engine_id === engine.engine_id).length;
+  const inventory = engine.online_meta?.inventory_summary;
+  const preferred = inventory?.preferred_runtime?.trim() || "";
+  const installed = (inventory?.installed || []).filter(Boolean);
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
@@ -1004,6 +1016,36 @@ function EngineCard({ engine, runs, violations }: { engine: EngineRecord; runs: 
           </Badge>
         </div>
       </div>
+      {(preferred || installed.length > 0) && (
+        <div className="mt-3 space-y-1.5 text-sm">
+          {preferred ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-slate-500">Preferred</span>
+              <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800">{preferred}</Badge>
+              {inventory?.preferred_runtime_installed === false && (
+                <span className="text-xs text-amber-600">未安装</span>
+              )}
+            </div>
+          ) : null}
+          {installed.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-slate-500">Installed</span>
+              {installed.map((id) => (
+                <Badge
+                  key={id}
+                  className={
+                    id === preferred
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-slate-200 bg-slate-50 text-slate-600"
+                  }
+                >
+                  {id}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
         <div>
           <div className="font-semibold text-slate-950">{count}</div>

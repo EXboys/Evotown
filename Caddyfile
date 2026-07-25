@@ -1,26 +1,44 @@
-# ── 宿主机 Caddy 反向代理配置 ──────────────────────────────────────
-# 将域名 HTTPS 流量转发到本机 Docker 暴露的 8080 端口
-# 自动申请并续期 Let's Encrypt TLS 证书
+# ── 宿主机 Caddy（生产推荐）────────────────────────────────────────
+# TLS 终结 + 路由：
+#   /api、/health、/ws、Arena 旧路径  → backend :8765（含 Doctor WebSocket）
+#   其余（SPA 静态）                   → frontend :8080
 #
-# 使用方式：
-#   1. 把下面的 evotown.example.com 替换成你的真实域名
-#   2. sudo caddy run --config /path/to/Caddyfile
-#      或放到 /etc/caddy/Caddyfile 后 sudo systemctl reload caddy
-
+# 前置：docker compose 将 backend 绑到 127.0.0.1:8765（见 docker-compose.yml）
+# 安装：合并进 /etc/caddy/Caddyfile 后 `sudo caddy validate` + `sudo systemctl reload caddy`
+#
+# 说明：frontend 容器内 nginx 仍可作「无宿主机反代」时的兜底；有本 Caddy 时 API/WS
+# 不再经过 nginx，避免双层代理漏 Upgrade。
 
 www.skilllite.ai {
-    # 必须开启：否则浏览器每次下载 ~2.7MB 未压缩 JS，Coding Agent 等页面长时间白屏
-    encode gzip
+	encode gzip
 
-    reverse_proxy localhost:8080 {
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-    }
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
 
-    log {
-        output stdout
-        format console
-    }
+	# Backend API + WebSocket（Caddy 自动透传 Upgrade）
+	@backend {
+		path /api/* /health /ws /ws/*
+		path /agents* /tasks* /config* /dispatcher* /monitor* /replay* /chronicle* /teams* /snapshot*
+	}
+	handle @backend {
+		reverse_proxy 127.0.0.1:8765 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# SPA / 静态资源
+	handle {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
 }
-

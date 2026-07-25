@@ -82,6 +82,18 @@ const SOURCE_LABEL: Record<TaskNode["source_type"], string> = {
   hosted_run: "托管运行",
 };
 
+const DISPATCH_RUNTIMES = [
+  { id: "", label: "默认（节点 preferred）" },
+  { id: "claude-code", label: "claude-code" },
+  { id: "hermes", label: "hermes" },
+  { id: "openclaw", label: "openclaw" },
+  { id: "codex", label: "codex" },
+] as const;
+
+function preferredRuntimeOf(engine?: FleetEngine | null): string {
+  return engine?.online_meta?.inventory_summary?.preferred_runtime?.trim() || "";
+}
+
 function isHostedEngine(engineId: string) {
   return engineId.startsWith("hosted-ws-");
 }
@@ -156,6 +168,7 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
     title: "",
     message: "",
     model: "",
+    runtime: "",
     chain: false,
     chain_team: "",
     chain_message: "",
@@ -252,6 +265,11 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
   }, [board]);
 
   const isHostedTarget = isHostedEngine(form.target_engine_id);
+  const selectedEngine = useMemo(
+    () => engines.find((e) => e.engine_id === form.target_engine_id),
+    [engines, form.target_engine_id],
+  );
+  const nodePreferredRuntime = preferredRuntimeOf(selectedEngine);
 
   const savePolicy = async () => {
     setPolicyLoading(true);
@@ -289,6 +307,15 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
     };
     const payload: Record<string, unknown> = {};
     if (form.model.trim()) payload.model = form.model.trim();
+    if (!isHostedTarget) {
+      if (form.runtime.trim()) {
+        payload.runtime = form.runtime.trim();
+      } else if (nodePreferredRuntime) {
+        // Explicitly stamp preferred so queued jobs keep the binding even if Doctor reconnects later
+        payload.runtime = nodePreferredRuntime;
+        payload.runtime_source = "preferred_runtime";
+      }
+    }
     if (form.chain && form.chain_team && form.chain_message.trim()) {
       payload.on_success_handoff = {
         kind: "handoff",
@@ -399,7 +426,14 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
                   <button
                     key={e.engine_id}
                     type="button"
-                    onClick={() => setForm((f) => ({ ...f, target_engine_id: e.engine_id, target_team_id: "" }))}
+                    onClick={() =>
+                      setForm((f) => ({
+                        ...f,
+                        target_engine_id: e.engine_id,
+                        target_team_id: "",
+                        runtime: "",
+                      }))
+                    }
                     className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
                       active
                         ? "border-slate-900 bg-slate-950 text-white shadow-sm"
@@ -443,6 +477,14 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
             <span className="font-medium text-slate-700">{isHostedTarget ? "托管工作区" : "Connector"}</span>
             <span className="text-slate-300">·</span>
             <span className="truncate font-mono text-[11px]">{form.target_engine_id || "未选引擎"}</span>
+            {!isHostedTarget && nodePreferredRuntime && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-800 ring-1 ring-emerald-100">
+                  preferred: {nodePreferredRuntime}
+                </span>
+              </>
+            )}
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
@@ -460,6 +502,22 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
             </label>
 
             <div className="flex shrink-0 flex-col gap-2 lg:w-44">
+              {!isHostedTarget && form.target_engine_id && (
+                <select
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  value={form.runtime}
+                  onChange={(e) => setForm({ ...form, runtime: e.target.value })}
+                  aria-label="Runtime"
+                >
+                  {DISPATCH_RUNTIMES.map((item) => (
+                    <option key={item.id || "default"} value={item.id}>
+                      {item.id === "" && nodePreferredRuntime
+                        ? `默认（${nodePreferredRuntime}）`
+                        : item.label}
+                    </option>
+                  ))}
+                </select>
+              )}
               {isHostedTarget && (
                 <select
                   className="rounded-lg border border-slate-200 px-3 py-2 text-sm"

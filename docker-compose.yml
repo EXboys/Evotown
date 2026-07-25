@@ -147,6 +147,9 @@ services:
       - evotown_replays:/app/replays
       # 运行日志持久化（便于宿主机直接 tail -f 或接入日志系统）
       - ./logs:/app/logs
+    # 供宿主机 Caddy 直连 API/WS（仅本机回环，勿对公网 0.0.0.0 暴露）
+    ports:
+      - "${BACKEND_HOST_BIND:-127.0.0.1:8765}:8765"
     expose:
       - "8765"
     healthcheck:
