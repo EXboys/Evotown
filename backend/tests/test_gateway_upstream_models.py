@@ -125,6 +125,10 @@ class GatewayUpstreamModelsTest(unittest.TestCase):
                 {"model": "corp-codex", "input": "Fix CI"},
                 "corp-codex",
             )
-        self.assertEqual(target, "https://api.example.com/v1/responses")
+        # Codex Responses is fulfilled via Chat Completions upstreams.
+        self.assertEqual(target, "https://api.example.com/v1/chat/completions")
         self.assertEqual(body["model"], "gpt-5.4")
+        self.assertEqual(body["messages"][0]["role"], "user")
+        self.assertEqual(body["messages"][0]["content"], "Fix CI")
         self.assertEqual(headers["Authorization"], "Bearer sk-test")
+        self.assertTrue(body.get("metadata", {}).get("evotown_responses_via_chat"))
