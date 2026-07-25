@@ -15,6 +15,15 @@ export type FleetEngine = {
   last_seen_at?: string;
   connector_version?: string;
   ingest_token_prefix?: string;
+  online_meta?: {
+    channel?: string;
+    inventory_summary?: {
+      preferred_runtime?: string;
+      preferred_runtime_installed?: boolean;
+      installed?: string[];
+      runtimes?: Array<{ id?: string; installed?: boolean; version?: string | null }>;
+    };
+  };
 };
 
 function toDispatchJob(raw: EvotownEventMap["dispatch_job_updated"]["job"]): DispatchJob {

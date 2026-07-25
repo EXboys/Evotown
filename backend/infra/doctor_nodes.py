@@ -81,10 +81,90 @@ def _inventory_summary(inventory: dict[str, Any]) -> dict[str, Any]:
         for r in runtimes
         if isinstance(r, dict)
     ]
-    return {
+    preferred = str(inventory.get("preferred_runtime") or "").strip()
+    preferred_installed = inventory.get("preferred_runtime_installed")
+    if preferred_installed is None and preferred:
+        preferred_installed = any(
+            r.get("id") == preferred and r.get("installed") for r in installed
+        )
+    summary: dict[str, Any] = {
         "runtime_count": len(installed),
         "installed": [r["id"] for r in installed if r.get("installed")],
         "runtimes": installed,
+    }
+    if preferred:
+        summary["preferred_runtime"] = preferred
+        summary["preferred_runtime_installed"] = bool(preferred_installed)
+    return summary
+
+
+def preferred_runtime_for_engine(engine_id: str) -> str:
+    """Best-known preferred_runtime for a Doctor node (live inventory, then online_meta)."""
+    session = get_session(engine_id)
+    if session is not None:
+        pref = str((session.inventory or {}).get("preferred_runtime") or "").strip()
+        if pref:
+            return pref
+        summary = _inventory_summary(session.inventory or {})
+        pref = str(summary.get("preferred_runtime") or "").strip()
+        if pref:
+            return pref
+    eng = engine_ingest.get_engine(engine_id) or {}
+    meta = eng.get("online_meta") or {}
+    if isinstance(meta, str):
+        try:
+            import json as _json
+
+            meta = _json.loads(meta)
+        except Exception:
+            meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    summary = meta.get("inventory_summary") or {}
+    if isinstance(summary, dict):
+        return str(summary.get("preferred_runtime") or "").strip()
+    return ""
+
+
+def job_assign_message(leased: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(leased.get("payload") or {})
+    runtime = (
+        payload.get("runtime")
+        or payload.get("runtime_hint")
+        or payload.get("runtime_target")
+        or ""
+    )
+    runtime = str(runtime).strip()
+    engine_id = str(
+        leased.get("target_engine_id")
+        or leased.get("lease_engine_id")
+        or leased.get("engine_id")
+        or ""
+    ).strip()
+    if not runtime and engine_id:
+        runtime = preferred_runtime_for_engine(engine_id)
+        if runtime:
+            payload["runtime"] = runtime
+            payload.setdefault("runtime_source", "preferred_runtime")
+    cwd = payload.get("cwd") or payload.get("workdir") or ""
+    timeout_sec = payload.get("timeout_sec") or payload.get("timeout") or 600
+    return {
+        "type": "job.assign",
+        "job": {
+            "job_id": leased.get("job_id"),
+            "run_id": leased.get("run_id") or leased.get("job_id"),
+            "kind": leased.get("kind"),
+            "title": leased.get("title") or "",
+            "message": leased.get("message") or "",
+            "payload": payload,
+            "refs": leased.get("refs") or {},
+            "source_engine_id": leased.get("source_engine_id") or "",
+            "lease_expires_at": leased.get("lease_expires_at"),
+            "runtime": runtime,
+            "cwd": cwd,
+            "timeout_sec": timeout_sec,
+        },
+        "server_time": _utc_now(),
     }
 
 
@@ -199,36 +279,6 @@ def disconnect_session(engine_id: str) -> None:
             meta=_meta_for(session, connected=False),
         )
     logger.info("doctor ws disconnected engine_id=%s", engine_id)
-
-
-def job_assign_message(leased: dict[str, Any]) -> dict[str, Any]:
-    payload = leased.get("payload") or {}
-    runtime = (
-        payload.get("runtime")
-        or payload.get("runtime_hint")
-        or payload.get("runtime_target")
-        or ""
-    )
-    cwd = payload.get("cwd") or payload.get("workdir") or ""
-    timeout_sec = payload.get("timeout_sec") or payload.get("timeout") or 600
-    return {
-        "type": "job.assign",
-        "job": {
-            "job_id": leased.get("job_id"),
-            "run_id": leased.get("run_id") or leased.get("job_id"),
-            "kind": leased.get("kind"),
-            "title": leased.get("title") or "",
-            "message": leased.get("message") or "",
-            "payload": payload,
-            "refs": leased.get("refs") or {},
-            "source_engine_id": leased.get("source_engine_id") or "",
-            "lease_expires_at": leased.get("lease_expires_at"),
-            "runtime": runtime,
-            "cwd": cwd,
-            "timeout_sec": timeout_sec,
-        },
-        "server_time": _utc_now(),
-    }
 
 
 def enqueue_outbound(engine_id: str, message: dict[str, Any]) -> bool:

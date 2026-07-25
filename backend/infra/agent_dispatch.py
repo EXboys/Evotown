@@ -443,6 +443,8 @@ def _finalize_lease(job_id: str, engine_id: str) -> dict[str, Any] | None:
         "payload": job["payload"],
         "refs": job["refs"],
         "source_engine_id": job["source_engine_id"],
+        "target_engine_id": job.get("target_engine_id") or engine_id,
+        "lease_engine_id": engine_id,
         "lease_expires_at": expires,
     }
 

@@ -156,6 +156,52 @@ class DoctorWsApiTest(unittest.TestCase):
             self.assertEqual(match["status"], "completed")
             self.assertIn("hi", match.get("result_summary") or "")
 
+    def test_doctor_ws_fills_preferred_runtime_when_missing(self) -> None:
+        client = self._client()
+        admin = {"X-Admin-Token": os.environ.get("ADMIN_TOKEN", "test-admin")}
+        token = self._register(client, admin, "doctor-pref-1")
+
+        with client.websocket_connect(f"/api/v1/doctor/ws?token={token}") as ws:
+            self.assertEqual(ws.receive_json()["type"], "welcome")
+            ws.send_json(
+                {
+                    "type": "hello",
+                    "engine_id": "doctor-pref-1",
+                    "doctor_version": "0.1.10",
+                    "inventory": {
+                        "preferred_runtime": "claude-code",
+                        "preferred_runtime_installed": True,
+                        "runtimes": [
+                            {"id": "claude-code", "installed": True, "version": "2.0.0"},
+                            {"id": "hermes", "installed": True, "version": "0.1"},
+                        ],
+                    },
+                }
+            )
+            self.assertEqual(ws.receive_json()["of"], "hello")
+
+            fleet = client.get("/api/v1/engines/fleet", headers=admin)
+            match = next(e for e in fleet.json()["engines"] if e["engine_id"] == "doctor-pref-1")
+            summary = (match.get("online_meta") or {}).get("inventory_summary") or {}
+            self.assertEqual(summary.get("preferred_runtime"), "claude-code")
+
+            create = client.post(
+                "/api/v1/jobs",
+                headers=admin,
+                json={
+                    "target_engine_id": "doctor-pref-1",
+                    "title": "Default runtime",
+                    "message": "Use preferred",
+                    "payload": {},
+                },
+            )
+            self.assertEqual(create.status_code, 200, create.text)
+            assign = ws.receive_json()
+            self.assertEqual(assign["type"], "job.assign")
+            self.assertEqual(assign["job"]["runtime"], "claude-code")
+            self.assertEqual(assign["job"]["payload"].get("runtime"), "claude-code")
+            self.assertEqual(assign["job"]["payload"].get("runtime_source"), "preferred_runtime")
+
     def test_doctor_ws_rejects_bad_token(self) -> None:
         client = self._client()
         with self.assertRaises(Exception):
