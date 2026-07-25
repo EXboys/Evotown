@@ -43,6 +43,8 @@ class AgentRunContext:
 
     # ── Claude SDK 专属 ──
     resume_session_id: str = ""              # 编排层查 DB 后填入，非 claude runner 忽略
+    # Resume 失败准备重跑时回调（编排层清掉已流式写入的 assistant_message / log_excerpt）
+    on_stream_reset: Callable[[], None] | None = None
 
 
 # ── Runner 接口 ────────────────────────────────────────────────────

@@ -340,6 +340,25 @@ def append_event(run_id: str, event_type: str, payload: dict[str, Any] | None = 
     return _event_from_row(row)
 
 
+def clear_streaming_output(run_id: str) -> int:
+    """Drop streamed assistant_message events and reset log_excerpt.
+
+    Used when a Claude resume attempt fails mid-stream and the runner restarts
+    fresh — without this, the UI shows the failed attempt plus the retry.
+    Returns the number of deleted events.
+    """
+    conn = _ensure_conn()
+    cur = conn.execute(
+        "DELETE FROM claude_agent_run_events WHERE run_id=? AND event_type=?",
+        (run_id, "assistant_message"),
+    )
+    conn.execute(
+        "UPDATE claude_agent_runs SET log_excerpt='', updated_at=datetime('now') WHERE run_id=?",
+        (run_id,),
+    )
+    return int(cur.rowcount or 0)
+
+
 def list_events(run_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
     rows = _ensure_conn().execute(
         """

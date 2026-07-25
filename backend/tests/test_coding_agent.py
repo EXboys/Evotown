@@ -704,6 +704,106 @@ class AppendLogExcerptTest(unittest.TestCase):
         assert stored is not None
         self.assertEqual(stored["log_excerpt"], clipped)
 
+    def test_clear_streaming_output_drops_assistant_messages(self) -> None:
+        from infra import claude_agent_runs
+
+        run = claude_agent_runs.create_run(
+            agent_id="agent_test",
+            account_id="acc_test",
+            prompt="visit baidu",
+            model="m",
+        )
+        rid = run["run_id"]
+        claude_agent_runs.append_event(rid, "assistant_message", {"text": "first attempt"})
+        claude_agent_runs.append_event(rid, "tool_call", {"name": "browser"})
+        claude_agent_runs.append_log_excerpt(rid, "first attempt")
+        deleted = claude_agent_runs.clear_streaming_output(rid)
+        self.assertEqual(deleted, 1)
+        events = claude_agent_runs.list_events(rid)
+        self.assertFalse(any(e["event_type"] == "assistant_message" for e in events))
+        self.assertTrue(any(e["event_type"] == "tool_call" for e in events))
+        stored = claude_agent_runs.get_run(rid)
+        assert stored is not None
+        self.assertEqual(stored.get("log_excerpt") or "", "")
+
+
+class ClaudeSdkResumeFallbackTest(unittest.TestCase):
+    def test_resume_failure_resets_stream_and_omits_expired_note(self) -> None:
+        """Resume 失败时应清流式正文、重跑，且不把 expired 注记写进用户可见 output。"""
+        import asyncio
+        import sys
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import MagicMock, patch
+
+        from services.agent_runner_base import AgentRunContext
+        from services import claude_agent_sdk_runner
+
+        resets: list[int] = []
+        emitted: list[str] = []
+
+        class _Assistant:
+            def __init__(self, text: str) -> None:
+                self.content = [SimpleNamespace(text=text)]
+
+        class _Result:
+            def __init__(self, *, session_id: str = "new-session") -> None:
+                self.subtype = "success"
+                self.is_error = False
+                self.errors = None
+                self.session_id = session_id
+
+        call_count = {"n": 0}
+
+        async def fake_query(*, prompt, options):  # noqa: ANN001
+            call_count["n"] += 1
+            if getattr(options, "resume", None) or (isinstance(options, dict) and options.get("resume")):
+                yield _Assistant("stale resume answer")
+                raise RuntimeError("session expired")
+            yield _Assistant("fresh answer only")
+            yield _Result()
+
+        class _Options:
+            def __init__(self, **kwargs):  # noqa: ANN003
+                self.__dict__.update(kwargs)
+
+        fake_sdk = ModuleType("claude_agent_sdk")
+        fake_sdk.AssistantMessage = _Assistant  # type: ignore[attr-defined]
+        fake_sdk.ResultMessage = _Result  # type: ignore[attr-defined]
+        fake_sdk.ClaudeAgentOptions = _Options  # type: ignore[attr-defined]
+        fake_sdk.query = fake_query  # type: ignore[attr-defined]
+
+        runner = claude_agent_sdk_runner.ClaudeCodeRunner()
+        ctx = AgentRunContext(
+            run_id="run_test",
+            agent_id="agt_test",
+            resume_session_id="b75fdbd1-4020-expired",
+            on_stream_reset=lambda: resets.append(1),
+        )
+
+        with patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk}), patch.object(
+            runner, "resolve_backend", return_value="sdk"
+        ), patch.object(runner, "_system_prompt", return_value=None), patch.object(
+            runner, "_mcp_servers", return_value={}
+        ), patch.object(runner, "_allowed_tools", return_value=[]), patch.object(
+            runner, "_max_turns", return_value=None
+        ):
+            result = asyncio.run(
+                runner.run(
+                    workspace_root=MagicMock(),
+                    prompt="open baidu",
+                    model="claude",
+                    context=ctx,
+                    on_message=emitted.append,
+                )
+            )
+
+        self.assertEqual(call_count["n"], 2)
+        self.assertEqual(resets, [1])
+        self.assertEqual(emitted, ["fresh answer only"])
+        self.assertEqual(result.output, "fresh answer only")
+        self.assertNotIn("expired", result.output)
+        self.assertNotIn("starting fresh", result.output)
+
 
 if __name__ == "__main__":
     unittest.main()

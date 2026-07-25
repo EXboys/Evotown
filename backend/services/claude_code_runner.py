@@ -1022,6 +1022,12 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
         claude_agent_runs.append_event(run_id, "assistant_message", {"text": text})
         claude_agent_runs.append_log_excerpt(run_id, text)
 
+    def on_stream_reset() -> None:
+        # Resume 失败重跑前清掉已流式写入的正文，避免 UI 叠两份回复
+        claude_agent_runs.clear_streaming_output(run_id)
+
+    ctx.on_stream_reset = on_stream_reset
+
     try:
         agent_coro = _run_agent(
             workspace_root=root,
@@ -1135,11 +1141,26 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
             {"warning": "invalid EVOTOWN_ARTIFACT_SORT_RULES; using defaults", "detail": sort_warning},
         )
 
-    claude_agent_runs.append_event(
-        run_id,
-        "assistant_message" if status == "succeeded" else "run.error",
-        {"exit_code": exit_code, "summary": summary, "text": summary},
+    # Streaming already wrote assistant_message events — do not append the full
+    # summary again (that duplicated the answer in the chat UI). On failure with
+    # no streamed text, keep a terminal error event for the UI.
+    has_streamed_assistant = any(
+        e.get("event_type") == "assistant_message"
+        for e in claude_agent_runs.list_events(run_id, limit=1000)
     )
+    if status == "succeeded":
+        if not has_streamed_assistant:
+            claude_agent_runs.append_event(
+                run_id,
+                "assistant_message",
+                {"exit_code": exit_code, "summary": summary, "text": summary},
+            )
+    else:
+        claude_agent_runs.append_event(
+            run_id,
+            "run.error",
+            {"exit_code": exit_code, "summary": summary, "text": summary, "error": summary},
+        )
     updated = claude_agent_runs.update_run_status(
         run_id,
         status=status,

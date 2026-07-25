@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shlex
 import shutil
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from services.agent_runner_base import AgentRunContext, AgentRunResult
+
+logger = logging.getLogger(__name__)
 
 _SDK_IMPORT_ERROR: str | None = None
 
@@ -183,6 +186,9 @@ class ClaudeCodeRunner:
         exit_code = 1
         claude_session_id = ""
         _emitted_texts: set[str] = set()
+        # Buffer while attempting resume so a failed resume never reaches the UI.
+        _buffer_only = bool(context.resume_session_id)
+        _buffer: list[str] = []
 
         def _emit(text: str) -> None:
             stripped = text.strip()
@@ -191,9 +197,21 @@ class ClaudeCodeRunner:
             if stripped in _emitted_texts:
                 return
             _emitted_texts.add(stripped)
+            if _buffer_only:
+                _buffer.append(text)
+                return
             log_lines.append(text)
             if on_message:
                 on_message(text)
+
+        def _flush_buffer() -> None:
+            nonlocal _buffer_only
+            _buffer_only = False
+            for text in _buffer:
+                log_lines.append(text)
+                if on_message:
+                    on_message(text)
+            _buffer.clear()
 
         async def _query():
             nonlocal exit_code, claude_session_id
@@ -213,20 +231,30 @@ class ClaudeCodeRunner:
                         exit_code = 1
                     claude_session_id = getattr(message, "session_id", "") or ""
 
-        # Try resume first; if stale/broken, silently fall back to fresh session
+        # Try resume first; if stale/broken, fall back to a fresh session.
+        # Buffered resume text is discarded so the chat never shows two answers.
         try:
             await _query()
+            _flush_buffer()
         except Exception:
-            if context.resume_session_id:
-                log_lines.clear()
-                log_lines.append(f"(session {context.resume_session_id[:12]}... expired, starting fresh)")
-                options_kwargs.pop("resume", None)
-                options = ClaudeAgentOptions(**options_kwargs)
-                exit_code = 1
-                claude_session_id = ""
-                await _query()
-            else:
+            if not context.resume_session_id:
                 raise
+            sid_prefix = context.resume_session_id[:12]
+            logger.info("claude session %s... expired/broken, starting fresh", sid_prefix)
+            _buffer.clear()
+            log_lines.clear()
+            _emitted_texts.clear()
+            _buffer_only = False  # fresh run streams live
+            if context.on_stream_reset is not None:
+                try:
+                    context.on_stream_reset()
+                except Exception:
+                    logger.exception("on_stream_reset failed for run %s", context.run_id)
+            options_kwargs.pop("resume", None)
+            options = ClaudeAgentOptions(**options_kwargs)
+            exit_code = 1
+            claude_session_id = ""
+            await _query()
 
         output = "\n".join(line for line in log_lines if line).strip()
         if len(output) > 65536:
