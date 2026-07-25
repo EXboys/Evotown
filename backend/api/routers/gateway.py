@@ -1107,6 +1107,14 @@ async def responses(
         if upstream_result.final_model:
             response.headers["X-Evotown-Final-Model"] = upstream_result.final_model
         response.headers["X-Evotown-Upstream-Attempts"] = str(len(upstream_result.attempts))
+        # Upstream chat/completions → Responses object for Codex.
+        if isinstance(data, dict) and data.get("object") == "chat.completion":
+            from infra.responses_bridge import chat_completion_to_response
+
+            data = chat_completion_to_response(
+                data,
+                model=upstream_result.final_model or ctx.client_model,
+            )
         return data
 
     raise HTTPException(status_code=upstream_result.status_code, detail=data)
@@ -1202,13 +1210,19 @@ async def _stream_upstream_responses(
                                     status_code=upstream.status_code,
                                 )
                             )
+                            from infra.responses_bridge import ChatToResponsesStream
+
+                            translator = ChatToResponsesStream(model=model_name)
                             async for line in upstream.aiter_lines():
                                 if not line:
                                     continue
                                 chunks_sent = True
                                 usage, cost = _parse_sse_usage(line, usage, cost)
-                                yield (line + "\n").encode("utf-8")
+                                for event in translator.feed_line(line):
+                                    yield event
                             if chunks_sent:
+                                for event in translator.finish(usage=usage):
+                                    yield event
                                 if response is not None:
                                     _finalize_success_audit(identity, response, request_id=ctx.request_id)
                                 return
