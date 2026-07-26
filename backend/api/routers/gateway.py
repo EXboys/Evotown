@@ -1156,13 +1156,19 @@ async def _stream_upstream_responses(
                     if total_attempts >= policy.max_total_attempts or time.perf_counter() >= deadline:
                         status_code = 502
                         error = "gateway retry budget exceeded"
-                        payload = json.dumps({"error": {"message": error, "type": "gateway_upstream_error"}})
-                        yield f"data: {payload}\n\n".encode("utf-8")
+                        from infra.responses_bridge import responses_stream_error_events
+
+                        for event in responses_stream_error_events(
+                            model=ctx.client_model,
+                            message=error,
+                        ):
+                            yield event
                         return
 
                     total_attempts += 1
                     target, headers, req_body = build_call(model_name)
                     chunks_sent = False
+                    translator = None
                     try:
                         async with client.stream("POST", target, json=req_body, headers=headers) as upstream:
                             status_code = upstream.status_code
@@ -1197,8 +1203,13 @@ async def _stream_upstream_responses(
                                     chain_len=len(ctx.model_chain),
                                 ):
                                     break
-                                payload = json.dumps({"error": {"message": error[:1000], "type": "gateway_upstream_error"}})
-                                yield f"data: {payload}\n\n".encode("utf-8")
+                                from infra.responses_bridge import responses_stream_error_events
+
+                                for event in responses_stream_error_events(
+                                    model=model_name,
+                                    message=error[:1000],
+                                ):
+                                    yield event
                                 return
 
                             attempts.append(
@@ -1245,6 +1256,24 @@ async def _stream_upstream_responses(
                             detail=error[:200],
                         )
                     )
+                    # After Responses events were already sent, never retry/fallback —
+                    # Codex already bound to this response id.
+                    if chunks_sent:
+                        status_code = 502
+                        from infra.responses_bridge import responses_stream_error_events
+
+                        if translator is not None and not translator.finished:
+                            for event in translator.feed_line(
+                                json.dumps({"error": {"message": error or kind}})
+                            ):
+                                yield event
+                        else:
+                            for event in responses_stream_error_events(
+                                model=model_name,
+                                message=error or kind,
+                            ):
+                                yield event
+                        return
                     if gateway_retry.should_retry_same_model(
                         policy=policy,
                         status_code=None,
@@ -1264,14 +1293,24 @@ async def _stream_upstream_responses(
                     ):
                         break
                     status_code = 502
-                    payload = json.dumps({"error": {"message": error or kind, "type": "gateway_upstream_error"}})
-                    yield f"data: {payload}\n\n".encode("utf-8")
+                    from infra.responses_bridge import responses_stream_error_events
+
+                    for event in responses_stream_error_events(
+                        model=model_name,
+                        message=error or kind,
+                    ):
+                        yield event
                     return
 
             status_code = 502
             error = error or "all models in chain failed"
-            payload = json.dumps({"error": {"message": error, "type": "gateway_upstream_error"}})
-            yield f"data: {payload}\n\n".encode("utf-8")
+            from infra.responses_bridge import responses_stream_error_events
+
+            for event in responses_stream_error_events(
+                model=ctx.client_model,
+                message=error,
+            ):
+                yield event
     finally:
         _record_attempts_metadata(ctx.body, attempts)
         latency_ms = int((time.perf_counter() - started) * 1000)
