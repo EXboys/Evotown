@@ -32,6 +32,10 @@ def responses_request_to_chat(body: dict[str, Any]) -> dict[str, Any]:
                 messages.append(message)
 
     messages = _reorder_tool_messages(messages)
+    # DeepSeek thinking models reject follow-up tool turns unless every
+    # assistant message that carries tool_calls also includes reasoning_content.
+    # Codex/Responses clients do not round-trip that field, so inject "" when missing.
+    _ensure_assistant_tool_reasoning(messages)
 
     if not messages:
         messages.append({"role": "user", "content": ""})
@@ -211,18 +215,19 @@ class ChatToResponsesStream:
             err = payload["error"]
             message = err.get("message") if isinstance(err, dict) else str(err)
             self.finished = True
+            failed = {
+                "id": self.response_id,
+                "object": "response",
+                "status": "failed",
+                "model": self.model,
+                "output": [],
+                "error": {"message": message or "upstream error"},
+            }
+            # Emit both failed and completed(status=failed): Codex CLI errors with
+            # "stream closed before response.completed" if the stream ends on failed alone.
             return [
-                self._event(
-                    "response.failed",
-                    {
-                        "response": {
-                            "id": self.response_id,
-                            "object": "response",
-                            "status": "failed",
-                            "error": {"message": message or "upstream error"},
-                        }
-                    },
-                )
+                self._event("response.failed", {"response": failed}),
+                self._event("response.completed", {"response": failed}),
             ]
 
         events = self._ensure_started()
@@ -410,6 +415,8 @@ def _input_item_to_messages(item: Any) -> list[dict[str, Any]]:
             {
                 "role": "assistant",
                 "content": None,
+                # Required by DeepSeek thinking mode on tool-call turns.
+                "reasoning_content": "",
                 "tool_calls": [
                     {
                         "id": str(item.get("call_id") or item.get("id") or f"call_{uuid.uuid4().hex[:8]}"),
@@ -443,6 +450,34 @@ def _input_item_to_messages(item: Any) -> list[dict[str, Any]]:
         if isinstance(content, str) and content.strip():
             return [{"role": "user", "content": content}]
     return []
+
+
+def _ensure_assistant_tool_reasoning(messages: list[dict[str, Any]]) -> None:
+    """Ensure assistant tool_calls messages include reasoning_content.
+
+    DeepSeek V3/V4 thinking mode returns:
+      The `reasoning_content` in the thinking mode must be passed back to the API.
+    when a prior assistant turn had tool_calls but the follow-up omits the field.
+    Empty string is accepted and keeps Codex (Responses API) working.
+    """
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            continue
+        if "reasoning_content" not in message:
+            message["reasoning_content"] = ""
+
+
+def responses_stream_error_events(*, model: str, message: str) -> list[bytes]:
+    """Emit Responses SSE terminal failure events Codex can consume.
+
+    Bare `data: {"error":...}` without `response.failed` / completion causes:
+      stream disconnected before completion: stream closed before response.completed
+    """
+    translator = ChatToResponsesStream(model=model or "unknown")
+    return translator.feed_line(json.dumps({"error": {"message": message}}))
 
 
 def _reorder_tool_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

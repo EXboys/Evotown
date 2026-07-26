@@ -78,6 +78,27 @@ class ResponsesBridgeTests(unittest.TestCase):
         self.assertEqual(roles, ["user", "assistant", "tool", "assistant"])
         self.assertEqual(chat["messages"][1]["tool_calls"][0]["id"], "call_1")
         self.assertEqual(chat["messages"][2]["tool_call_id"], "call_1")
+        # DeepSeek thinking mode requires this field on assistant tool turns.
+        self.assertEqual(chat["messages"][1].get("reasoning_content"), "")
+
+    def test_assistant_tool_calls_get_empty_reasoning_content(self) -> None:
+        chat = responses_request_to_chat(
+            {
+                "model": "deepseek-v4-flash",
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]},
+                    {
+                        "type": "function_call",
+                        "call_id": "call_00_abc",
+                        "name": "shell",
+                        "arguments": '{"cmd":"ls"}',
+                    },
+                    {"type": "function_call_output", "call_id": "call_00_abc", "output": "ok"},
+                ],
+            }
+        )
+        assistant = next(m for m in chat["messages"] if m.get("tool_calls"))
+        self.assertEqual(assistant["reasoning_content"], "")
 
     def test_bare_json_error_line_emits_failed(self) -> None:
         translator = ChatToResponsesStream(model="m")
@@ -86,6 +107,7 @@ class ResponsesBridgeTests(unittest.TestCase):
         )
         joined = "\n".join(e.decode("utf-8") for e in events)
         self.assertIn("response.failed", joined)
+        self.assertIn("response.completed", joined)
         self.assertIn("unknown variant", joined)
         self.assertTrue(translator.finished)
 
