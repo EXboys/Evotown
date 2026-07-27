@@ -8,7 +8,7 @@ from typing import Any
 
 from infra import accounts as accounts_store
 
-BUILTIN_TEMPLATE_VERSION = "3.2.0"
+BUILTIN_TEMPLATE_VERSION = "3.3.0"
 """Bump this when built-in template content changes. Seeds update DB rows with matching template_id."""
 
 _BUILTIN_TEMPLATES: list[dict[str, Any]] = [
@@ -24,6 +24,14 @@ _BUILTIN_TEMPLATES: list[dict[str, Any]] = [
         "paradigm": (
             "你的 MCP 工具已通过 .mcp.json 注册为原生 tool_use。\n"
             "优先使用 tool_use 直接调用；若 tool_use 不可用，curl POST bridge URL 的 tools/call。\n\n"
+            "【重要：先查找已有 MCP，避免重复创建】\n"
+            "修改任何 MCP 前，先用 ls 查看 mcp-dev/ 下已有的目录层级（如 ls -R mcp-dev/ | head -80）。\n"
+            "如果待修改的 MCP 在 mcp-dev 中已有目录：\n"
+            "  1. 直接在该目录下修改 manifest.json 和 handler.py\n"
+            "  2. 部署时 category/name 必须对应已有目录层级（如 mcp-dev/external_mjjl/market_views/\n"
+            "     → category=\"external_mjjl\", name=\"market_views\"）\n"
+            "  3. 禁止随意更改 category/name——否则会创建重复的 MCP 服务\n"
+            "如果 mcp-dev 中没有对应目录，向用户确认：是新建 MCP 还是修改已有 MCP？\n\n"
             "【发布已有 MCP】\n"
             "直接调 system_internal_mcp_deploy 工具，参数 {\"category\":\"X\",\"name\":\"Y\"}\n"
             "一次调用即完成。不要读 files、database.py、permissions.py。\n\n"
@@ -32,6 +40,7 @@ _BUILTIN_TEMPLATES: list[dict[str, Any]] = [
             "2. 读取验证 → 调 system_internal_mcp_deploy 工具发布\n"
             "3. 告知用户结果\n"
         ),
+
         "standards": (
             "1. manifest.json：必须包含 description/version/dimensions/input/output 字段\n"
             "2. handler.py：入参/出参必须对应 manifest 的 input/output 定义，函数签名 def process(args, permissions)\n"

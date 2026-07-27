@@ -52,27 +52,12 @@ class HostedDispatchTest(unittest.TestCase):
         importlib.reload(main)
         return TestClient(main.app)
 
-    def test_workspace_registers_fleet_engine(self) -> None:
-        from infra import hosted_agent_engines, agents
-
-        agent = agents.create_agent(account_id="acct-1", name="Dispatch Sandbox")
-        engine_id = hosted_agent_engines.engine_id_for_agent(agent["agent_id"])
-
-        client = self._client()
-        fleet = client.get("/api/v1/engines/fleet", headers={"X-Admin-Token": "test-admin"})
-        self.assertEqual(fleet.status_code, 200)
-        engines = fleet.json().get("engines") or []
-        match = next((e for e in engines if e.get("engine_id") == engine_id), None)
-        self.assertIsNotNone(match)
-        self.assertEqual(match.get("engine_type"), "hosted_coding")
-        self.assertTrue(match.get("online"))
-
-    def test_dispatch_job_runs_on_hosted_workspace(self) -> None:
-        from infra import hosted_agent_engines, agents
+    def test_dispatch_job_runs_on_agent(self) -> None:
+        from infra import agents
         from services import hosted_dispatch_worker
 
         agent = agents.create_agent(account_id="acct-dispatch", name="Job Target")
-        engine_id = hosted_agent_engines.engine_id_for_agent(agent["agent_id"])
+        agent_id = agent["agent_id"]
 
         client = self._client()
         admin = {"X-Admin-Token": "test-admin"}
@@ -80,7 +65,7 @@ class HostedDispatchTest(unittest.TestCase):
             "/api/v1/jobs",
             headers=admin,
             json={
-                "target_engine_id": engine_id,
+                "target_agent_id": agent_id,
                 "title": "Fix bug",
                 "message": "Inspect README and summarize the workspace.",
             },
@@ -111,11 +96,11 @@ class HostedDispatchTest(unittest.TestCase):
         self.assertTrue(str(job.get("run_id") or "").startswith("car_"))
 
     def test_dispatch_payload_model_is_used(self) -> None:
-        from infra import claude_agent_runs, hosted_agent_engines, agents
+        from infra import claude_agent_runs, agents
         from services import hosted_dispatch_worker
 
         agent = agents.create_agent(account_id="acct-model", name="Model Target")
-        engine_id = hosted_agent_engines.engine_id_for_agent(agent["agent_id"])
+        agent_id = agent["agent_id"]
 
         client = self._client()
         admin = {"X-Admin-Token": "test-admin"}
@@ -123,7 +108,7 @@ class HostedDispatchTest(unittest.TestCase):
             "/api/v1/jobs",
             headers=admin,
             json={
-                "target_engine_id": engine_id,
+                "target_agent_id": agent_id,
                 "message": "hello",
                 "payload": {"model": "deepseek-v4-flash"},
             },
@@ -150,12 +135,12 @@ class HostedDispatchTest(unittest.TestCase):
 
         self.assertEqual(captured.get("model"), "deepseek-v4-flash")
 
-    def test_archived_workspace_rejects_dispatch_target(self) -> None:
-        from infra import hosted_agent_engines, agents
+    def test_archived_agent_rejects_dispatch_target(self) -> None:
+        from infra import agents
 
         agent = agents.create_agent(account_id="acct-arch", name="Archived")
-        engine_id = hosted_agent_engines.engine_id_for_agent(agent["agent_id"])
-        agents.update_agent(agent["agent_id"], status=agents.AGENT_STATUS_ARCHIVED)
+        agent_id = agent["agent_id"]
+        agents.update_agent(agent_id, status=agents.AGENT_STATUS_ARCHIVED)
 
         client = self._client()
         admin = {"X-Admin-Token": "test-admin"}
@@ -163,9 +148,25 @@ class HostedDispatchTest(unittest.TestCase):
             "/api/v1/jobs",
             headers=admin,
             json={
-                "target_engine_id": engine_id,
+                "target_agent_id": agent_id,
                 "title": "Should fail",
                 "message": "noop",
             },
         )
         self.assertEqual(create.status_code, 422)
+
+    def test_legacy_hosted_engine_target_is_rejected(self) -> None:
+        """Old hosted-ws-* engine targets should be rejected with clear message."""
+        client = self._client()
+        admin = {"X-Admin-Token": "test-admin"}
+        create = client.post(
+            "/api/v1/jobs",
+            headers=admin,
+            json={
+                "target_engine_id": "hosted-ws-old-agent-123",
+                "title": "Legacy",
+                "message": "This should be rejected",
+            },
+        )
+        self.assertEqual(create.status_code, 422)
+        self.assertIn("deprecated", create.text)

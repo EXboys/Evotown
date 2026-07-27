@@ -21,3 +21,5 @@ bcrypt>=4.0
 # Database drivers (testing + MCP dynamic services)
 pymysql>=1.1
 psycopg[binary]>=3.2
+# PDF export (Chinese-capable via Unicode)
+fpdf2>=2.7

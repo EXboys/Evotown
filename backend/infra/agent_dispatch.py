@@ -17,7 +17,7 @@ from domain.models import (
     DispatchJobCreate,
     EngineHeartbeat,
 )
-from infra import engine_ingest, hosted_agent_engines
+from infra import engine_ingest, hosted_agent_engines, agents
 
 _LEASE_SECONDS = 300
 _ONLINE_SECONDS = 120
@@ -54,6 +54,12 @@ def _ensure_dispatch_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_dispatch_jobs_target_team ON dispatch_jobs(target_team_id);
         """
     )
+    # ── Schema migration: add target_agent_id ──
+    dj_cols = {r["name"] for r in conn.execute("PRAGMA table_info(dispatch_jobs)").fetchall()}
+    if "target_agent_id" not in dj_cols:
+        conn.execute("ALTER TABLE dispatch_jobs ADD COLUMN target_agent_id TEXT NOT NULL DEFAULT ''")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_dispatch_jobs_target_agent ON dispatch_jobs(target_agent_id)")
+    # ── Schema migration: engines table ──
     rows = conn.execute("PRAGMA table_info(engines)").fetchall()
     columns = {row["name"] for row in rows}
     for name, sql in {
@@ -154,21 +160,28 @@ def _enrich_engine_row(row: sqlite3.Row) -> dict[str, Any]:
             online = (datetime.now(timezone.utc) - seen).total_seconds() <= _ONLINE_SECONDS
         except ValueError:
             online = False
-    caps = data.get("capabilities") or {}
-    if caps.get("hosted") and hosted_agent_engines.hosted_agent_available(data["engine_id"]):
-        data["online"] = True
-    else:
-        data["online"] = online
+    data["online"] = online
     data["online_meta"] = _json_loads(data.get("online_meta") or "{}", {})
     return data
 
 
+def _agent_available(agent_id: str) -> bool:
+    agent = agents.get_agent(agent_id)
+    return agent is not None and agent.get("status") == agents.AGENT_STATUS_ACTIVE
+
+
 def _validate_targets(body: DispatchJobCreate) -> None:
-    if not body.target_engine_id and not body.target_team_id:
-        raise ValueError("target_engine_id or target_team_id is required")
+    if not body.target_engine_id and not body.target_team_id and not body.target_agent_id:
+        raise ValueError("target_engine_id, target_agent_id or target_team_id is required")
+    if body.target_agent_id:
+        agent = agents.get_agent(body.target_agent_id)
+        if agent is None:
+            raise ValueError("target agent not found")
+        if agent.get("status") != agents.AGENT_STATUS_ACTIVE:
+            raise ValueError("target agent is not active")
     if body.target_engine_id and hosted_agent_engines.is_hosted_engine(body.target_engine_id):
-        if not hosted_agent_engines.hosted_agent_available(body.target_engine_id):
-            raise ValueError("target hosted coding workspace is not available")
+        # Legacy hosted engine targets are no longer supported — use target_agent_id instead
+        raise ValueError("hosted engine targets are deprecated, use target_agent_id")
 
 
 def fail_job(job_id: str, *, summary: str) -> dict[str, Any] | None:
@@ -246,10 +259,10 @@ def create_job(
         """
         INSERT INTO dispatch_jobs (
             job_id, kind, status, source_type, source_engine_id,
-            target_engine_id, target_team_id, title, message,
+            target_engine_id, target_agent_id, target_team_id, title, message,
             payload_json, refs_json, run_id, created_at, updated_at
         )
-        VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, '', datetime('now'), datetime('now'))
+        VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', datetime('now'), datetime('now'))
         """,
         (
             job_id,
@@ -257,6 +270,7 @@ def create_job(
             source_type,
             src_engine,
             body.target_engine_id or "",
+            body.target_agent_id or "",
             body.target_team_id or "",
             body.title,
             body.message,
@@ -337,8 +351,6 @@ def _requeue_stale(conn: sqlite3.Connection) -> None:
 
 
 def lease_job(engine_id: str) -> dict[str, Any] | None:
-    if hosted_agent_engines.is_hosted_engine(engine_id):
-        return None
     engine = engine_ingest.get_engine(engine_id)
     if engine is None:
         return None
@@ -389,26 +401,24 @@ def lease_job(engine_id: str) -> dict[str, Any] | None:
 
 
 def claim_next_hosted_job() -> dict[str, Any] | None:
-    """Claim the next queued job targeted at a hosted coding workspace engine."""
-    prefix = hosted_agent_engines.HOSTED_ENGINE_PREFIX + "%"
+    """Claim the next queued job targeted at a hosted agent (target_agent_id is set)."""
     conn = _db()
     _requeue_stale(conn)
     while True:
         row = conn.execute(
             """
             SELECT * FROM dispatch_jobs
-            WHERE status='queued' AND target_engine_id LIKE ?
+            WHERE status='queued' AND target_agent_id != ''
             ORDER BY created_at ASC
             LIMIT 1
             """,
-            (prefix,),
         ).fetchone()
         if row is None:
             return None
         job_id = row["job_id"]
-        engine_id = row["target_engine_id"]
-        if not hosted_agent_engines.hosted_agent_available(engine_id):
-            fail_job(job_id, summary="target hosted coding workspace is not available")
+        agent_id = row["target_agent_id"]
+        if not _agent_available(agent_id):
+            fail_job(job_id, summary="target agent is not available")
             continue
         expires = _expires_at(_LEASE_SECONDS)
         updated = conn.execute(
@@ -417,7 +427,7 @@ def claim_next_hosted_job() -> dict[str, Any] | None:
             SET status='leased', lease_engine_id=?, lease_expires_at=?, updated_at=datetime('now')
             WHERE job_id=? AND status='queued'
             """,
-            (engine_id, expires, job_id),
+            (agent_id, expires, job_id),
         ).rowcount
         if not updated:
             continue

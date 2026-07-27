@@ -70,6 +70,7 @@ def process(args: dict, permissions: dict) -> dict[str, Any]:
         STATUS_PENDING,
         get_service,
         get_pending_version,
+        list_services,
         register_service,
         create_service_version,
     )
@@ -80,6 +81,30 @@ def process(args: dict, permissions: dict) -> dict[str, Any]:
     existing = get_service(service_id)
 
     if existing is None:
+        # ── Check for mcp_path conflict ───────────────────────────
+        # Prevent agent from creating duplicate MCP under a different
+        # category/name while the same mcp_path is already registered.
+        all_svcs = list_services()
+        conflict = None
+        for s in all_svcs:
+            if s.get("mcp_path", "").strip("/") == mcp_path.strip("/"):
+                conflict = s
+                break
+        if conflict:
+            parts = conflict.get("mcp_path", "").strip("/").split("/", 1)
+            correct_category = parts[0] if len(parts) > 0 else "?"
+            correct_name = parts[1] if len(parts) > 1 else "?"
+            return {
+                "ok": False,
+                "data": None,
+                "error": (
+                    f"mcp_path '{mcp_path}' 已被服务 '{conflict['service_id']}' "
+                    f"（{conflict.get('name', '?')}）使用。"
+                    f"如需更新已有 MCP，请传入 "
+                    f"category=\"{correct_category}\", name=\"{correct_name}\""
+                ),
+            }
+
         # ── First-time submission ──────────────────────────────────
         register_service(
             service_id=service_id,

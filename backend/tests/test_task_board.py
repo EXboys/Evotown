@@ -51,7 +51,7 @@ class TaskBoardApiTest(unittest.TestCase):
 
     def test_task_board_shows_dispatch_and_run(self) -> None:
         from domain.models import DispatchJobCreate
-        from infra import agent_dispatch, claude_agent_runs, agents, accounts, hosted_agent_engines
+        from infra import agent_dispatch, claude_agent_runs, agents, accounts
 
         client = self._client()
         admin = {"X-Admin-Token": "test-admin"}
@@ -59,12 +59,11 @@ class TaskBoardApiTest(unittest.TestCase):
         account = accounts.create_account(name="board-owner", role="admin")
         agent = agents.create_agent(account_id=account["account_id"], name="Board Agent")
         agent_id = agent["agent_id"]
-        hosted_agent_engines.register_agent_engine(agent)
 
         job = agent_dispatch.create_job(
             DispatchJobCreate(
                 kind="dispatch",
-                target_engine_id=hosted_agent_engines.engine_id_for_agent(agent_id),
+                target_agent_id=agent_id,
                 title="Review PR",
                 message="Check the latest pull request",
             ),
@@ -98,7 +97,7 @@ class TaskBoardApiTest(unittest.TestCase):
 
     def test_task_board_filters_by_agent(self) -> None:
         from domain.models import DispatchJobCreate
-        from infra import agent_dispatch, agents, accounts, hosted_agent_engines
+        from infra import agent_dispatch, agents, accounts
 
         client = self._client()
         admin = {"X-Admin-Token": "test-admin"}
@@ -106,13 +105,11 @@ class TaskBoardApiTest(unittest.TestCase):
         account = accounts.create_account(name="filter-owner", role="admin")
         agent_a = agents.create_agent(account_id=account["account_id"], name="Agent A")
         agent_b = agents.create_agent(account_id=account["account_id"], name="Agent B")
-        hosted_agent_engines.register_agent_engine(agent_a)
-        hosted_agent_engines.register_agent_engine(agent_b)
 
         agent_dispatch.create_job(
             DispatchJobCreate(
                 kind="dispatch",
-                target_engine_id=hosted_agent_engines.engine_id_for_agent(agent_a["agent_id"]),
+                target_agent_id=agent_a["agent_id"],
                 title="A task",
                 message="Only for A",
             ),
@@ -120,7 +117,7 @@ class TaskBoardApiTest(unittest.TestCase):
         agent_dispatch.create_job(
             DispatchJobCreate(
                 kind="dispatch",
-                target_engine_id=hosted_agent_engines.engine_id_for_agent(agent_b["agent_id"]),
+                target_agent_id=agent_b["agent_id"],
                 title="B task",
                 message="Only for B",
             ),
@@ -135,7 +132,7 @@ class TaskBoardApiTest(unittest.TestCase):
 
     def test_dispatch_run_completion_moves_column(self) -> None:
         from domain.models import DispatchJobCreate, DispatchJobComplete
-        from infra import agent_dispatch, claude_agent_runs, agents, accounts, hosted_agent_engines, task_nodes
+        from infra import agent_dispatch, claude_agent_runs, agents, accounts, task_nodes
 
         client = self._client()
         admin = {"X-Admin-Token": "test-admin"}
@@ -143,12 +140,11 @@ class TaskBoardApiTest(unittest.TestCase):
         account = accounts.create_account(name="flow-owner", role="admin")
         agent = agents.create_agent(account_id=account["account_id"], name="Flow Agent")
         agent_id = agent["agent_id"]
-        hosted_agent_engines.register_agent_engine(agent)
 
         job = agent_dispatch.create_job(
             DispatchJobCreate(
                 kind="dispatch",
-                target_engine_id=hosted_agent_engines.engine_id_for_agent(agent_id),
+                target_agent_id=agent_id,
                 title="Finish me",
                 message="Complete this job",
             ),
@@ -162,7 +158,7 @@ class TaskBoardApiTest(unittest.TestCase):
         agent_dispatch.complete_job(
             job["job_id"],
             DispatchJobComplete(
-                engine_id=hosted_agent_engines.engine_id_for_agent(agent_id),
+                engine_id=agent_id,
                 status="succeeded",
                 run_id=run["run_id"],
                 result_summary="done",

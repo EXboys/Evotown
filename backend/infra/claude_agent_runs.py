@@ -293,6 +293,22 @@ def update_run_status(
     return get_run(run_id)
 
 
+def append_log_excerpt(run_id: str, text: str) -> None:
+    """运行中实时追加文本到 log_excerpt（前端轮询即可看到原始日志）。
+    
+    由 on_message 回调调用，每段文本追加一行。结束后 update_run_status
+    会用完整 output 覆写，所以此处无需精确控制最终内容。
+    """
+    safe = text.replace("\x00", "")
+    if not safe.strip():
+        return
+    conn = _ensure_conn()
+    conn.execute(
+        "UPDATE claude_agent_runs SET log_excerpt = SUBSTR(log_excerpt || ?, -65536, 65536) WHERE run_id = ?",
+        (safe + "\n", run_id),
+    )
+
+
 def append_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None, *, seq: int | None = None) -> dict[str, Any]:
     conn = _ensure_conn()
     next_seq = seq

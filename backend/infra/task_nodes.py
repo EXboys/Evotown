@@ -8,7 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from infra import agent_dispatch, claude_agent_runs, hosted_agent_engines
+from infra import agent_dispatch, claude_agent_runs
+from infra import system_config as _system_config
 
 _backend_dir = Path(__file__).resolve().parent.parent
 _evotown_data = _backend_dir.parent / "data"
@@ -105,9 +106,7 @@ def _node_from_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _agent_id_from_dispatch_job(job: dict[str, Any]) -> str:
-    engine_id = str(job.get("target_engine_id") or "")
-    agent_id = hosted_agent_engines.agent_id_from_engine(engine_id)
-    return agent_id or ""
+    return str(job.get("target_agent_id") or "")
 
 
 def _board_status_from_dispatch(status: str) -> str:
@@ -361,3 +360,256 @@ def list_board(
 def get_node(node_id: str) -> dict[str, Any] | None:
     row = _ensure_conn().execute("SELECT * FROM task_nodes WHERE node_id=?", (node_id,)).fetchone()
     return _node_from_row(row) if row else None
+
+
+# ── Maintenance mode + queued hosted runs ──────────────────────────────
+
+def _maintenance_flag_path() -> Path:
+    return _data_dir() / ".maintenance"
+
+
+def is_maintenance() -> bool:
+    return _maintenance_flag_path().exists()
+
+
+def set_maintenance(enable: bool) -> None:
+    flag = _maintenance_flag_path()
+    if enable:
+        flag.touch()
+    else:
+        flag.unlink(missing_ok=True)
+
+
+def count_running() -> int:
+    row = _ensure_conn().execute(
+        "SELECT COUNT(*) FROM task_nodes WHERE board_status='running'",
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def enqueue_hosted_run(
+    *,
+    agent_id: str,
+    account_id: str,
+    prompt: str,
+    model: str = "",
+    skills: list[str] | None = None,
+    attachments: list[str] | None = None,
+    previous_run_id: str = "",
+    session_id: str = "",
+    runtime_engine: str = "claude",
+    tenant_id: str = "",
+    team_id: str = "",
+) -> dict[str, Any]:
+    """Create a queued task_node for a hosted agent run (maintenance mode)."""
+    node_id = f"tn_{uuid.uuid4().hex[:20]}"
+    payload = {
+        "account_id": account_id,
+        "prompt": prompt,
+        "model": model,
+        "skills": skills or [],
+        "attachments": attachments or [],
+        "previous_run_id": previous_run_id,
+        "session_id": session_id,
+        "runtime_engine": runtime_engine,
+        "tenant_id": tenant_id,
+        "team_id": team_id,
+    }
+    conn = _ensure_conn()
+    conn.execute(
+        """
+        INSERT INTO task_nodes (
+            node_id, agent_id, source_type, source_id, title, message,
+            board_status, source_status, payload_json, refs_json,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, '', ?, 'queued', 'queued', ?, '{}', datetime('now'), datetime('now'))
+        """,
+        (node_id, agent_id, SOURCE_HOSTED_RUN, node_id, prompt, _json_dumps(payload)),
+    )
+    row = conn.execute("SELECT * FROM task_nodes WHERE node_id=?", (node_id,)).fetchone()
+    assert row is not None
+    return _node_from_row(row)
+
+
+def get_queued_hosted_runs(*, limit: int = 50) -> list[dict[str, Any]]:
+    """Return queued hosted_run task_nodes ordered by creation time."""
+    rows = _ensure_conn().execute(
+        """
+        SELECT * FROM task_nodes
+        WHERE source_type=? AND board_status='queued'
+        ORDER BY created_at ASC
+        LIMIT ?
+        """,
+        (SOURCE_HOSTED_RUN, limit),
+    ).fetchall()
+    return [_node_from_row(r) for r in rows]
+
+
+def mark_node_running(node_id: str, run_id: str) -> None:
+    _ensure_conn().execute(
+        """
+        UPDATE task_nodes
+        SET board_status='running', source_status='running',
+            source_id=?, run_id=?, updated_at=datetime('now')
+        WHERE node_id=?
+        """,
+        (run_id, run_id, node_id),
+    )
+
+
+def mark_node_done(node_id: str, status: str = "done") -> None:
+    _ensure_conn().execute(
+        """
+        UPDATE task_nodes
+        SET board_status=?, source_status=?, completed_at=datetime('now'),
+            updated_at=datetime('now')
+        WHERE node_id=?
+        """,
+        (status, status, node_id),
+    )
+
+
+async def drain_queued_hosted_runs(*, max_active_per_account: int = 2) -> int:
+    """Execute queued hosted runs (called on startup after deployment).
+    Returns the number of runs dispatched.
+    """
+    from infra import claude_agent_runs as _car
+    from services import claude_code_runner as _ccr
+    import os as _os
+
+    dispatched = 0
+    queued = get_queued_hosted_runs(limit=100)
+    for node in queued:
+        p = node.get("payload") or {}
+        if not isinstance(p, dict):
+            p = {}
+        account_id = str(p.get("account_id") or "")
+        agent_id = str(node.get("agent_id") or "")
+
+        # Check concurrency limit
+        max_active = int(_system_config.get_config("EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT", "2") or "2")
+        if max_active > 0 and _car.active_run_count(account_id) >= max_active:
+            continue
+
+        try:
+            run = _car.create_run(
+                agent_id=agent_id,
+                account_id=account_id,
+                prompt=str(p.get("prompt") or node.get("message") or ""),
+                tenant_id=str(p.get("tenant_id") or ""),
+                team_id=str(p.get("team_id") or ""),
+                model=str(p.get("model") or ""),
+                signals={
+                    "workspace_name": "",
+                    "selected_skills": list(p.get("skills") or []),
+                    "previous_run_id": str(p.get("previous_run_id") or ""),
+                    "session_id": str(p.get("session_id") or ""),
+                    "attachments": list(p.get("attachments") or []),
+                    "runtime_engine": str(p.get("runtime_engine") or "claude"),
+                },
+            )
+            run_id = run["run_id"]
+            mark_node_running(node["node_id"], run_id)
+            _ccr.schedule_run(run_id)
+            dispatched += 1
+        except Exception:
+            mark_node_done(node["node_id"], "failed")
+
+    return dispatched
+
+
+# ── Drain worker: 后台持续轮询排队任务 ──
+
+import asyncio as _asyncio
+import logging as _logging
+
+_logger = _logging.getLogger("evotown.task_nodes")
+
+
+async def try_drain_one() -> bool:
+    """即时触发：run 完成时尝试取一个排队任务执行。返回是否派发。"""
+    if is_maintenance():
+        return False
+    result = await drain_queued_hosted_runs(max_active_per_account=2)
+    return result > 0
+
+
+async def drain_hosted_runs_loop(*, poll_interval: float = 5.0) -> None:
+    """后台轮询：每隔 poll_interval 秒扫描排队任务并执行。"""
+    _logger.info("[drain] worker started — poll_interval=%.1fs", poll_interval)
+    try:
+        while True:
+            try:
+                dispatched = await drain_queued_hosted_runs(max_active_per_account=2)
+                if dispatched:
+                    _logger.info("[drain] dispatched %d queued runs", dispatched)
+            except Exception as exc:
+                _logger.exception("[drain] loop error: %s", exc)
+            await _asyncio.sleep(poll_interval)
+    except _asyncio.CancelledError:
+        pass
+
+
+def recover_zombie_running_runs() -> int:
+    """启动恢复：将意外中断的 running 任务重置为 queued 以便 drain 重新执行。
+
+    覆盖两个来源：
+    1. task_nodes 中 board_status='running' 的记录（排队路径）
+    2. claude_agent_runs 中 status='running' 但无 task_node 的记录（直接执行路径）
+
+    返回恢复数量。
+    """
+    from infra import claude_agent_runs as _car
+    conn = _ensure_conn()
+    recovered = 0
+
+    # ── 1. 扫描 task_nodes 中的 running 僵尸 ──
+    rows = conn.execute(
+        "SELECT * FROM task_nodes WHERE board_status='running' AND source_type=?",
+        (SOURCE_HOSTED_RUN,),
+    ).fetchall()
+    for row in rows:
+        node = _node_from_row(row)
+        run_id = str(node.get("run_id") or "")
+        if not run_id:
+            conn.execute(
+                "UPDATE task_nodes SET board_status='queued', source_status='queued', updated_at=datetime('now') WHERE node_id=?",
+                (node["node_id"],),
+            )
+            recovered += 1
+            continue
+        run = _car.get_run(run_id)
+        if run and run.get("status") == "running":
+            _car.update_run_status(run_id, status="failed", error="interrupted by restart")
+            conn.execute(
+                "UPDATE task_nodes SET board_status='queued', source_status='queued', source_id=?, run_id='', updated_at=datetime('now') WHERE node_id=?",
+                (node["node_id"], node["node_id"]),
+            )
+            recovered += 1
+
+    # ── 2. 扫描 claude_agent_runs 中 running 但无 task_node 的记录 ──
+    all_runs = _car.list_runs(limit=500)
+    for run in all_runs.get("runs") or []:
+        if run.get("status") != "running":
+            continue
+        rid = run["run_id"]
+        existing = conn.execute(
+            "SELECT 1 FROM task_nodes WHERE source_type=? AND source_id=?",
+            (SOURCE_HOSTED_RUN, rid),
+        ).fetchone()
+        if existing:
+            continue  # 已有 task_node，由步骤 1 处理
+        # 无 task_node → 标记 run failed，创建 task_node 排队
+        _car.update_run_status(rid, status="failed", error="interrupted by restart")
+        node_id = f"tn_{uuid.uuid4().hex[:20]}"
+        conn.execute(
+            "INSERT INTO task_nodes (node_id, agent_id, source_type, source_id, title, message,"
+            " board_status, source_status, run_id, payload_json, refs_json, created_at, updated_at)"
+            " VALUES (?,?,?,?,'',?,'queued','queued','','{}','{}',datetime('now'),datetime('now'))",
+            (node_id, run.get("agent_id",""), SOURCE_HOSTED_RUN, node_id, run.get("prompt","")),
+        )
+        recovered += 1
+
+    if recovered:
+        _logger.info("[recover] reset %d zombie running runs to queued", recovered)
+    return recovered

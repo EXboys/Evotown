@@ -6,7 +6,7 @@ import logging
 import os
 
 from domain.models import DispatchJobAck, DispatchJobComplete
-from infra import agent_dispatch, claude_agent_runs, hosted_agent_engines, agents
+from infra import agent_dispatch, claude_agent_runs, agents
 from infra.dispatch_notify import broadcast_dispatch_job
 from services import claude_code_runner
 
@@ -22,7 +22,8 @@ def _poll_interval_sec() -> float:
 
 
 def _max_active_runs_per_account() -> int:
-    raw = os.environ.get("EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT", "2").strip()
+    from infra import system_config
+    raw = system_config.get_config("EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT", "2").strip()
     try:
         return int(raw)
     except ValueError:
@@ -37,9 +38,9 @@ async def process_next_hosted_job() -> bool:
 
     job_id = job["job_id"]
     engine_id = job["target_engine_id"]
-    agent_id = hosted_agent_engines.agent_id_from_engine(engine_id)
+    agent_id = job.get("target_agent_id") or ""
     if not agent_id:
-        agent_dispatch.fail_job(job_id, summary="invalid hosted engine id")
+        agent_dispatch.fail_job(job_id, summary="no target agent id on job")
         return True
 
     agent = agents.get_agent(agent_id)

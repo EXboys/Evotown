@@ -154,9 +154,11 @@ def invoke_mcp(service_id: str, args: dict, permissions: dict, *, tool_name: str
 
 
 def _resolve_external_tool_name(service_id: str, tool_name: str) -> str:
-    """Given an agent-side tool_name like 'svc_id__original_tool', return the
-    remote MCP server's tool name. Falls back to service_id if tool_name is empty
-    or doesn't contain the separator.
+    """Given an agent-side tool_name, return the remote MCP server's original tool name.
+
+    Two formats are supported:
+      New:  {safe_sid}__{service_name}__{original_tool}
+      Old:  {safe_sid}__{original_tool}
     """
     if not tool_name:
         return ""
@@ -166,7 +168,17 @@ def _resolve_external_tool_name(service_id: str, tool_name: str) -> str:
         return ""
     prefix = f"{safe_sid}__"
     if tool_name.startswith(prefix):
-        return tool_name[len(prefix):]
+        rest = tool_name[len(prefix):]
+        # New format: service_name embedded before original tool name
+        from infra import mcp_registry as _reg
+        svc = _reg.get_service(service_id)
+        svc_name = svc.get("name", "") if svc else ""
+        if svc_name:
+            svc_name_prefix = f"{svc_name}__"
+            if rest.startswith(svc_name_prefix):
+                return rest[len(svc_name_prefix):]
+        # Old format or fallback: rest is the original tool name
+        return rest
     # tool_name doesn't match the expected prefix pattern — pass as-is
     return tool_name
 
@@ -323,6 +335,8 @@ def fetch_external_tools(service_id: str) -> list[dict[str, Any]]:
     remote_tools = rpc_result.get("tools", []) if isinstance(rpc_result, dict) else []
 
     safe_sid = service_id.replace("-", "_")
+    svc_name = svc.get("name", "")
+    name_prefix = f"{safe_sid}__{svc_name}__" if svc_name else f"{safe_sid}__"
     tools: list[dict[str, Any]] = []
     for rt in remote_tools:
         if not isinstance(rt, dict):
@@ -331,8 +345,8 @@ def fetch_external_tools(service_id: str) -> list[dict[str, Any]]:
         if not original_name:
             continue
         tools.append({
-            "name": f"{safe_sid}__{original_name}",
-            "description": rt.get("description") or original_name,
+            "name": f"{name_prefix}{original_name}",
+            "description": f"[{svc_name}] {rt.get('description') or original_name}" if svc_name else (rt.get("description") or original_name),
             "input_schema": rt.get("inputSchema") or rt.get("input_schema") or {"type": "object", "properties": {}},
         })
 

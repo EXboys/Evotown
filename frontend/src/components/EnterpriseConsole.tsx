@@ -34,6 +34,7 @@ import { LanguageToggle } from "./LanguageToggle";
 import { adminFetch, clearConsoleSession, isConsoleAuthenticated, isStaffEmployee } from "../hooks/useAdminToken";
 import { STAFF_EMPLOYEE_HOME } from "../lib/staffRoutes";
 import { useSystemConfig } from "../hooks/useSystemConfig";
+import { SystemLogo } from "./SystemLogo";
 import { formatDateTimeShort } from "../lib/datetime";
 import { useLocale, type Locale } from "../lib/i18n";
 
@@ -640,7 +641,7 @@ export function EnterpriseConsole({
         <aside className="hidden w-64 shrink-0 bg-slate-950 text-white md:flex md:h-screen md:sticky md:top-0 md:flex-col">
           <div className="shrink-0 border-b border-white/10 px-5 py-5">
             <button onClick={() => navigate("/")} className="flex items-center gap-3 text-left">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500 text-sm font-semibold text-white">E</span>
+              <SystemLogo className="h-9 w-9 rounded-lg" fallbackLetter="E" />
               <span>
                 <span className="block text-sm font-semibold">{brand} Console</span>
                 <span className="mt-0.5 block text-xs text-slate-400">Enterprise control plane</span>
@@ -828,7 +829,7 @@ export function EnterpriseConsole({
             {tab === "gateway" && <GatewayConsole data={data} locale={locale} />}
             {tab === "accounts" && <GatewayAccountsPanel locale={locale} />}
             {tab === "engines" && <Engines engines={data.engines} runs={data.runs} violations={data.violations} />}
-            {(tab === "dispatch" || tab === "taskboard") && <TaskBoardPanel engines={data.engines} onRefresh={load} />}
+            {(tab === "dispatch" || tab === "taskboard") && <TaskBoardPanel onRefresh={load} />}
             {tab === "coding" && <CodingAgentPage locale={locale} initialAgentId={initialAgentId} />}
             {tab === "runs" && <Runs runs={data.runs} selectedRun={selectedRun} events={events} loading={eventsLoading} onRun={openRun} onAssetSubmitted={() => setRoute("assets")} />}
             {tab === "skills" && <SkillsConsole locale={locale} />}

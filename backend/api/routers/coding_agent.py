@@ -12,6 +12,8 @@ from core.auth import check_prompt_injection, require_console_read, validate_sou
 from domain.models import AgentExternalTriggerRequest, AgentShareRequest, ApiResponse, ClaudeAgentRunCreate, WorkspaceCreate, WorkspaceProfileUpdate, WorkspaceUpdate
 from infra import claude_agent_runs, workspace_files, workspace_profile, workspace_share, workspace_uploads, agents
 from infra import accounts as accounts_store
+from infra import task_nodes
+from infra import system_config
 from services import claude_code_runner
 
 router = APIRouter(prefix="/api/v1", tags=["agent"])
@@ -486,16 +488,36 @@ async def create_agent_run(agent_id: str, body: ClaudeAgentRunCreate, identity: 
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="agent run is not allowed for this agent")
 
     account_id = _account_id(identity)
-    max_active = int(os.environ.get("EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT", "2") or "2")
-    if max_active > 0 and claude_agent_runs.active_run_count(account_id) >= max_active:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="too many active hosted agent runs")
+    max_active = int(system_config.get_config("EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT", "2") or "2")
 
     attachment_paths = _normalize_attachment_paths(agent, list(body.attachments or []))
-
     profile = workspace_profile.get_profile(agent)
     run_skills = list(body.skills or []) or list(profile.get("default_skills") or [])
     run_model = claude_code_runner.resolve_run_model(body.model or profile.get("default_model") or "")
     runtime_engine = str(profile.get("runtime_engine") or "claude").strip().lower()
+
+    def _enqueue() -> dict:
+        node = task_nodes.enqueue_hosted_run(
+            agent_id=agent_id,
+            account_id=account_id,
+            prompt=body.prompt,
+            model=run_model,
+            skills=run_skills,
+            attachments=attachment_paths,
+            previous_run_id=body.previous_run_id,
+            runtime_engine=runtime_engine,
+            tenant_id=agent.get("tenant_id", ""),
+            team_id=agent.get("team_id", ""),
+        )
+        return {"queued": True, "node_id": node["node_id"], "node": node, "max_active": max_active}
+
+    # ── Maintenance mode: queue the run instead of executing immediately ──
+    if task_nodes.is_maintenance():
+        return _enqueue()
+
+    # ── Concurrency limit: auto-enqueue instead of 429 ──
+    if max_active > 0 and claude_agent_runs.active_run_count(account_id) >= max_active:
+        return _enqueue()
 
     run = claude_agent_runs.create_run(
         agent_id=agent_id,
@@ -540,12 +562,34 @@ async def external_trigger_agent(
     if not agents.can_access_agent(agent, {"account_id": account_id}):
         return {"code": 403, "message": "无权访问该Agent", "data": None}
 
-    # 4. 并发限制
-    max_active = int(os.environ.get("EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT", "2") or "2")
-    if max_active > 0 and claude_agent_runs.active_run_count(account_id) >= max_active:
-        return {"code": 429, "message": "当前运行中任务数已达上限", "data": None}
+    # 4. 维护模式或并发限制：排队而非立即执行
+    profile = workspace_profile.get_profile(agent)
+    run_skills = list(body.skills or []) or list(profile.get("default_skills") or [])
+    run_model = claude_code_runner.resolve_run_model(body.model or profile.get("default_model") or "")
+    runtime_engine = str(profile.get("runtime_engine") or "claude").strip().lower()
 
-    # 5. 解析 session_id → previous_run_id
+    def _enqueue(msg: str = "维护中，任务已排队") -> dict:
+        node = task_nodes.enqueue_hosted_run(
+            agent_id=agent_id,
+            account_id=account_id,
+            prompt=body.prompt,
+            model=run_model,
+            skills=run_skills,
+            attachments=body.attachments or [],
+            runtime_engine=runtime_engine,
+            tenant_id=agent.get("tenant_id", ""),
+            team_id=agent.get("team_id", ""),
+        )
+        return {"code": 202, "message": msg, "data": {"node_id": node["node_id"], "board_status": "queued"}}
+
+    if task_nodes.is_maintenance():
+        return _enqueue("维护中，任务已排队")
+
+    max_active = int(system_config.get_config("EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT", "2") or "2")
+    if max_active > 0 and claude_agent_runs.active_run_count(account_id) >= max_active:
+        return _enqueue("运行中任务数已达上限，已加入排队")
+
+    # 6. 解析 session_id → previous_run_id
     previous_run_id = ""
     session_id = body.session_id.strip()
     if session_id:
@@ -561,11 +605,6 @@ async def external_trigger_agent(
             previous_run_id = chain[-1].get("run_id", "") if chain else ""
         else:
             session_id = ""
-
-    # 6. 解析 skills / model
-    profile = workspace_profile.get_profile(agent)
-    run_skills = list(body.skills or []) or list(profile.get("default_skills") or [])
-    run_model = claude_code_runner.resolve_run_model(body.model or profile.get("default_model") or "")
 
     # 7. 标准化 attachments
     attachment_paths: list[str] = []
@@ -583,7 +622,7 @@ async def external_trigger_agent(
             return {"code": 404, "message": f"附件不存在: {rel}", "data": None}
         attachment_paths.append(rel)
 
-    # 8. 创建 run
+    # 9. 创建 run
     try:
         run = claude_agent_runs.create_run(
             agent_id=agent_id,
@@ -597,7 +636,7 @@ async def external_trigger_agent(
                 "selected_skills": run_skills,
                 "previous_run_id": previous_run_id,
                 "attachments": attachment_paths,
-                "runtime_engine": str(profile.get("runtime_engine") or "claude").strip().lower(),
+                "runtime_engine": runtime_engine,
                 "source": "external_api",
             },
         )
@@ -860,3 +899,107 @@ async def set_session_title(
     updated_by = str(identity.get("account_id") or identity.get("login_name") or "")
     claude_agent_runs.set_session_title(agent_id, session_id, title, updated_by)
     return {"ok": True, "title": title}
+
+
+@router.get("/agent-runs/{run_id}/export-pdf")
+async def export_run_pdf(run_id: str):
+    """Export a run's final assistant reply as a PDF."""
+    from fpdf import FPDF
+    from io import BytesIO
+    from fontTools.ttLib import TTCollection
+    import os as _os
+
+    run = claude_agent_runs.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    events = claude_agent_runs.list_events(run_id)
+    msgs = [e for e in events if e.get("event_type") == "assistant_message"]
+    if not msgs:
+        raise HTTPException(status_code=404, detail="no assistant reply found")
+
+    last = msgs[-1]
+    payload = last.get("payload", {})
+    text = (payload.get("text") or payload.get("summary") or "").strip() if isinstance(payload, dict) else ""
+    if not text:
+        raise HTTPException(status_code=404, detail="empty assistant reply")
+
+    # Extract single TTF from TTC (index 2 = SC Simplified Chinese)
+    # The TTC contains 10 fonts; index 0 is JP (Japanese), index 2 is SC (Simplified Chinese)
+    ttf_path = "/tmp/NotoSansCJKsc-Regular.ttf"
+    if not _os.path.exists(ttf_path):
+        TTCollection("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")[2].save(ttf_path)
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_font("CJK", fname=ttf_path)
+    pdf.set_font("CJK", size=11)
+
+    margin = 20
+    pw = pdf.w - 2 * margin
+    in_code = False
+    code_buf: list[str] = []
+
+    for line in text.split("\n"):
+        if line.startswith("```"):
+            if in_code:
+                pdf.set_font_size(9)
+                pdf.set_fill_color(30, 41, 59)
+                pdf.set_text_color(226, 232, 240)
+                for cl in code_buf:
+                    if pdf.get_y() + 13 > pdf.h - 20:
+                        pdf.add_page()
+                    pdf.set_x(margin)
+                    pdf.cell(pw, 13, cl[:120], fill=True)
+                    pdf.ln()
+                pdf.set_text_color(30, 41, 59)
+                pdf.set_font("CJK", size=11)
+                pdf.ln(4)
+                code_buf = []
+            in_code = not in_code
+            continue
+        if in_code:
+            code_buf.append(line)
+            continue
+
+        stripped = line.strip()
+        if not stripped:
+            pdf.ln(4)
+            continue
+
+        pdf.set_text_color(30, 41, 59)
+        if stripped.startswith("### "):
+            pdf.set_font_size(13)
+            pdf.multi_cell(pw, 18, stripped[4:])
+            pdf.set_x(margin)
+            pdf.ln(2)
+        elif stripped.startswith("## "):
+            pdf.set_font_size(15)
+            pdf.multi_cell(pw, 21, stripped[3:])
+            pdf.set_x(margin)
+            pdf.ln(3)
+        elif stripped.startswith("# "):
+            pdf.set_font_size(18)
+            pdf.multi_cell(pw, 25, stripped[2:])
+            pdf.set_x(margin)
+            pdf.ln(4)
+        elif stripped.startswith("- "):
+            pdf.set_font_size(11)
+            pdf.set_x(margin + 4)
+            pdf.cell(6, 15, "\u2022")
+            pdf.multi_cell(pw - 10, 15, stripped[2:])
+            pdf.set_x(margin)
+        elif stripped.startswith("|"):
+            continue
+        else:
+            pdf.set_font_size(11)
+            pdf.multi_cell(pw, 15, stripped)
+            pdf.set_x(margin)
+
+    pdf_bytes = pdf.output()
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=agent-response-{run_id[:8]}.pdf"},
+    )

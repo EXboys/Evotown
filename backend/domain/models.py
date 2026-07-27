@@ -194,6 +194,7 @@ class DispatchJobCreate(BaseModel):
     kind: DispatchJobKind = "dispatch"
     source_engine_id: str | None = Field(default=None, max_length=128)
     target_engine_id: str | None = Field(default=None, max_length=128)
+    target_agent_id: str | None = Field(default=None, max_length=128)
     target_team_id: str | None = Field(default=None, max_length=128)
     title: str = Field(default="", max_length=256)
     message: str = Field(min_length=1, max_length=32000)
