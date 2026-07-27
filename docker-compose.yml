@@ -121,8 +121,15 @@ services:
     # bwrap 内部还会对 skill 子进程施加独立的 seccomp BPF 过滤（见 linux.rs）。
     cap_add:
       - SYS_ADMIN          # bwrap 创建 user namespace 所需（mount --make-slave /）
+    # ── 安全加固：容器文件系统只读，防止 Agent 篡改平台源码 ──
+    # 平台代码（/app/services /app/infra /app/api 等）打包在 Docker 镜像中，
+    # 非 volume/tmpfs 路径全部只读。Agent 只能写入明确挂载的数据目录。
+    read_only: true
     security_opt:
       - seccomp:./seccomp-bwrap.json
+    tmpfs:
+      - /tmp:exec,size=512M
+      - /var/run
     volumes:
       # 进化产物持久化
       - evotown_arena:/root/.skilllite/arena
