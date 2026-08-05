@@ -248,20 +248,14 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
-    from infra import hosted_agent_engines
     from services.hosted_dispatch_worker import hosted_dispatch_loop
-
-    try:
-        synced = hosted_agent_engines.sync_all_active_agents()
-        if synced:
-            logger.info("[hosted-dispatch] synced %d active agent fleet engines", synced)
-    except Exception as exc:
-        logger.warning("[hosted-dispatch] agent fleet sync failed: %s", exc)
 
     _timeout_task = asyncio.create_task(_timeout_loop())
     _checkpoint_task = asyncio.create_task(_checkpoint_loop())
     _chronicle_task = asyncio.create_task(_chronicle_loop())
     _hosted_dispatch_task = asyncio.create_task(hosted_dispatch_loop())
+    from infra.task_nodes import drain_hosted_runs_loop
+    _drain_task = asyncio.create_task(drain_hosted_runs_loop(poll_interval=5.0))
     from services.claude_code_runner import stale_run_watchdog_loop
     from pathlib import Path as _P_import
     import os as _os_import
@@ -275,6 +269,21 @@ async def lifespan(app: FastAPI):
     _copy_mcp_system_files(_dev_dir)
     # 注意：内存看门狗在 ProcessManager 内部自动启动（spawn 时调用 _start_memory_watchdog）
 
+    # ── 维护模式恢复：清除维护标志 + 排水排队任务 ──
+    from infra import task_nodes as _tn
+    # 1. 恢复僵尸 running 任务（平台意外停止时中断的任务）
+    recovered = _tn.recover_zombie_running_runs()
+    if recovered:
+        logger.info("[startup] recovered %d zombie running runs → queued", recovered)
+    # 2. 维护模式 → 排水
+    if _tn.is_maintenance():
+        logger.info("[maintenance] clearing maintenance flag, draining queued hosted runs...")
+        _tn.set_maintenance(False)
+        dispatched = await _tn.drain_queued_hosted_runs(max_active_per_account=2)
+        logger.info("[maintenance] drained %d queued hosted runs", dispatched)
+    else:
+        _tn.set_maintenance(False)
+
     yield
 
     _timeout_task.cancel()
@@ -282,7 +291,8 @@ async def lifespan(app: FastAPI):
     _chronicle_task.cancel()
     _hosted_dispatch_task.cancel()
     _claude_watchdog_task.cancel()
-    for _t in (_timeout_task, _checkpoint_task, _chronicle_task, _hosted_dispatch_task, _claude_watchdog_task):
+    _drain_task.cancel()
+    for _t in (_timeout_task, _checkpoint_task, _chronicle_task, _hosted_dispatch_task, _claude_watchdog_task, _drain_task):
         try:
             await _t
         except asyncio.CancelledError:

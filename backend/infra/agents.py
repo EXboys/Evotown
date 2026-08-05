@@ -248,10 +248,6 @@ def create_agent(
             "UPDATE agents SET key_id=?, raw_key=? WHERE agent_id=?",
             (key_id, raw_key, agent_id),
         )
-    if agent:
-        from infra import hosted_agent_engines
-
-        hosted_agent_engines.register_agent_engine(agent)
     return agent
 
 
@@ -378,10 +374,6 @@ def update_agent(
         values,
     )
     updated = get_agent(agent_id)
-    if updated is not None:
-        from infra import hosted_agent_engines
-
-        hosted_agent_engines.sync_agent_engine(updated)
     return updated
 
 

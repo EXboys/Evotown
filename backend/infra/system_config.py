@@ -55,10 +55,24 @@ DEFAULTS: list[tuple[str, str, str | None, str, str, str, str | None]] = [
         "select",
         '["routes_only","all"]',
     ),
+    (
+        "EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT",
+        "2",
+        "EVOTOWN_CLAUDE_MAX_ACTIVE_RUNS_PER_ACCOUNT",
+        "system",
+        "单账号最大活跃Run数",
+        "number",
+        None,
+    ),
 ]
 
 # Keys that require a backend restart when changed
-_RESTART_KEYS = {"staff_session_ttl", "EVOTOWN_CLAUDE_RUN_TIMEOUT_SEC", "EVOTOWN_CLAUDE_MAX_TURNS"}
+_RESTART_KEYS = {
+    "staff_session_ttl",
+    "EVOTOWN_CLAUDE_RUN_TIMEOUT_SEC",
+    "EVOTOWN_CLAUDE_MAX_TURNS",
+    "EVOTOWN_CLAUDE_CONTEXT_ROUNDS",
+}
 
 
 def _data_dir() -> Path:
@@ -129,6 +143,13 @@ def sync_env_on_startup() -> list[str]:
     return changed
 
 
+def get_config(key: str, default: str = "") -> str:
+    """Read a config value from system.db. Returns default if not found."""
+    conn = _db()
+    row = conn.execute("SELECT value FROM system_config WHERE key=?", (key,)).fetchone()
+    return str(row["value"]) if row else default
+
+
 def update_config(updates: dict[str, str]) -> list[str]:
     """Update config key→value pairs. Returns keys that need a restart."""
     restart_needed: list[str] = []
@@ -162,10 +183,10 @@ def logo_exists() -> bool:
 
 
 def get_all() -> list[dict]:
-    """Return all config rows (admin view)."""
+    """Return all config rows (admin view) with restart_required flag."""
     conn = _db()
     rows = conn.execute("SELECT * FROM system_config ORDER BY category, key").fetchall()
-    return [dict(r) for r in rows]
+    return [{**dict(r), "restart_required": r["key"] in _RESTART_KEYS} for r in rows]
 
 
 def get_public() -> dict[str, str]:

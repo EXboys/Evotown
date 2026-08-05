@@ -610,14 +610,11 @@ def _render_agent_context_md(
             for entry in skill_entries[:30]:
                 if isinstance(entry, dict):
                     sid = entry.get("skill_id", "")
-                    name = entry.get("name", sid)
-                    summary = entry.get("summary") or entry.get("description") or ""
-                    lines.append(f"- **{sid}** — {name}")
-                    if summary:
-                        lines.append(f"  {summary}")
+                    lines.append(f"- `{sid}` → `.evotown/skills/{sid}/SKILL.md`")
         else:
             lines.append("- (no skills assigned)")
         lines.append("")
+
 
     lines.extend(
         [
@@ -962,17 +959,19 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
 
     # Prepend mandatory skill instructions to prompt so model prioritizes them
     if selected_skills:
-        from infra import skill_market as _sm2
-        skill_lines = []
-        for sid in selected_skills:
-            entry = _sm2.get_market_skill(sid)
-            name = entry.get("name", sid) if entry else sid
-            skill_lines.append(f"  - {name} ({sid})")
+        skill_paths = [f"  .evotown/skills/{sid}/SKILL.md" for sid in selected_skills]
         mandatory_block = (
             "[SYSTEM SKILL ENFORCEMENT]\n"
-            "You MUST read and use each skill below for this task:\n"
-            + "\n".join(skill_lines) +
-            "\n\nDo NOT skip any skill. If a skill is unusable, explain why.\n"
+            "\n"
+            "在调用任何工具或执行任何操作之前，你必须先完成以下步骤：\n"
+            "\n"
+            "1. 用 Read 工具依次读取以下技能文件：\n"
+            + "\n".join(skill_paths) +
+            "\n\n"
+            "2. 严格按照每个 SKILL.md 中定义的步骤和关卡执行，\n"
+            "   不得跳过任何步骤，不得自行发挥，不得仅凭技能名称推断流程。\n"
+            "\n"
+            "如果某个 SKILL.md 不存在，报告后继续下一个。\n"
             "\n-------------------\n\n"
         )
         prompt = mandatory_block + prompt

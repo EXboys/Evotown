@@ -4,6 +4,7 @@ import { clearConsoleSession, canAccessAdminConsole, isConsoleAuthenticated } fr
 import type { Locale } from "../lib/i18n";
 import { LanguageToggle } from "./LanguageToggle";
 import { useSystemConfig } from "../hooks/useSystemConfig";
+import { SystemLogo } from "./SystemLogo";
 
 const HEADER_COPY = {
   zh: {
@@ -129,13 +130,11 @@ export function PublicSiteHeader({
     <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 backdrop-blur">
       <div className={`mx-auto flex items-center justify-between gap-3 px-5 py-4 ${maxWidthClass}`}>
         <Link to="/" className="flex min-w-0 shrink items-center gap-3">
-          <span
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white shadow-sm ${
-              isMarket ? "rounded-xl bg-gradient-to-br from-violet-600 to-blue-600" : "bg-slate-950"
-            }`}
-          >
-            {isMarket ? "S" : "E"}
-          </span>
+          {isMarket ? (
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-blue-600 text-sm font-semibold text-white shadow-sm">S</span>
+          ) : (
+            <SystemLogo className="h-9 w-9 shrink-0 rounded-lg shadow-sm" fallbackLetter="E" />
+          )}
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold text-slate-950">{brand}</span>
             <span className="block truncate text-xs text-slate-500">{copy.subtitle[variant]}</span>

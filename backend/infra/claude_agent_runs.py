@@ -299,7 +299,7 @@ def append_log_excerpt(run_id: str, text: str, *, max_len: int = 65536) -> str:
     Used by Coding Agent runners while tokens arrive; final status updates may
     still replace the field via ``update_run_status``.
     """
-    chunk = text or ""
+    chunk = (text or "").replace("\x00", "")
     if not chunk:
         run = get_run(run_id)
         return str((run or {}).get("log_excerpt") or "")

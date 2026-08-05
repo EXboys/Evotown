@@ -218,6 +218,9 @@ export function CodingAgentChatPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [queuedToast, setQueuedToast] = useState(false);
+  const [queuedRuns, setQueuedRuns] = useState<AgentRun[]>([]);
+  const [maxActive, setMaxActive] = useState(2);
   const PAGE_SIZE = 10;
   const [hasMoreRuns, setHasMoreRuns] = useState(true);
   const loadingMoreRef = useRef(false);
@@ -244,6 +247,25 @@ export function CodingAgentChatPage() {
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [rightOpen, setRightOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState("");
+
+  // ── 排队提示 Toast ──────────────────────────────────────────────────
+  useEffect(() => { if (queuedToast) { const t = setTimeout(() => setQueuedToast(false), 3000); return () => clearTimeout(t); } }, [queuedToast]);
+
+  // ── 排队任务轮询刷新（任务被 drain 执行后自动移除） ──────────────────
+  const refreshQueuedRuns = useCallback(async () => {
+    if (!agentId) return;
+    try {
+      const tbData = await adminFetch(`/api/v1/task-board?agent_id=${encodeURIComponent(agentId)}&limit=50`).then((res) => res.json());
+      const queued = (tbData.columns?.queued || []) as Array<{ node_id: string; message?: string; created_at: string; payload?: Record<string, unknown> }>;
+      const currentIds = new Set(queued.map(q => q.node_id).filter(Boolean));
+      setQueuedRuns(prev => prev.filter(r => currentIds.has(r.run_id)));
+    } catch { /* ignore */ }
+  }, [agentId]);
+  useEffect(() => {
+    if (!agentId) return;
+    const interval = setInterval(refreshQueuedRuns, 5000);
+    return () => clearInterval(interval);
+  }, [agentId, refreshQueuedRuns]);
 
   // ── Export helpers ──────────────────────────────────────────────────
   const getRunResponseText = (runId: string): string => {
@@ -399,8 +421,35 @@ export function CodingAgentChatPage() {
       setAgent(wsData.agent); setError("");
       const runData = await adminFetch(`/api/v1/agent-runs?agent_id=${encodeURIComponent(agentId)}&limit=${PAGE_SIZE}`).then((res) => readJson<{ runs?: AgentRun[]; has_more?: boolean }>(res));
       const loaded = runData.runs || [];
-      setRuns(loaded);
       setHasMoreRuns(!!runData.has_more);
+      // 读取排队中的任务（task_board API），合成前台显示
+      try {
+        const tbData = await adminFetch(`/api/v1/task-board?agent_id=${encodeURIComponent(agentId)}&limit=50`).then((res) => res.json());
+        const queued = (tbData.columns?.queued || []) as Array<{ node_id: string; message?: string; created_at: string; payload?: Record<string, unknown> }>;
+        const queuedSynthetic: AgentRun[] = [];
+        for (const q of queued) {
+          if (!q.node_id) continue;
+          const p = (q.payload || {}) as Record<string, unknown>;
+          queuedSynthetic.push({
+            run_id: q.node_id,
+            agent_id: agentId,
+            account_id: "",
+            status: "queued" as AgentRun["status"],
+            prompt: (q.message as string) || (p.prompt as string) || "",
+            model: (p.model as string) || "",
+            tenant_id: "",
+            team_id: "",
+            signals: {
+              previous_run_id: (p.previous_run_id as string) || "",
+              attachments: (p.attachments as string[]) || [],
+            },
+            created_at: q.created_at || new Date().toISOString(),
+            updated_at: q.created_at || new Date().toISOString(),
+          } as AgentRun);
+        }
+        setQueuedRuns(queuedSynthetic);
+      } catch { /* ignore */ }
+      setRuns(loaded);
       void loadAgentFiles(true);
       try {
         const tData = await adminFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/session-titles`).then((res) => res.json());
@@ -447,9 +496,12 @@ export function CodingAgentChatPage() {
   }, [agentId, hasMoreRuns, runs, selectedRunId]);
 
   // Run chain — when a session is selected, runs are session-scoped
+  // Filter out queued synthetic runs (node_id as run_id, starts with "tn_")
   const runChain = useMemo(() => {
     if (!selectedRunId) return [];
-    return [...runs].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return [...runs]
+      .filter(r => !r.run_id.startsWith("tn_"))
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [selectedRunId, runs]);
 
   // Events — SSE stream for running runs, one-time fetch for completed runs
@@ -969,17 +1021,50 @@ export function CodingAgentChatPage() {
     const attachmentPaths = pendingAttachments.map((item) => item.path);
     if (!sentPrompt && !attachmentPaths.length) return;
     setBusy(true); setError("");
+    // 用最后一个非排队状态的真实 run 作为 previous_run_id，避免 chain 断裂
+    const lastRealRunId = (() => {
+      if (!selectedRunId) return ""; // 新会话：不续接任何历史
+      const realRuns = runs.filter(r => r.status !== "queued" && r.run_id !== selectedRunId);
+      if (realRuns.length > 0) return realRuns[realRuns.length - 1].run_id;
+      return selectedRunId;
+    })();
     try {
       const data = await adminFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/runs`, {
         method: "POST",
         body: JSON.stringify({
           prompt: sentPrompt || "请处理我上传的附件。",
           model,
-          previous_run_id: selectedRun?.run_id || selectedRunId || "",
+          previous_run_id: lastRealRunId,
           attachments: attachmentPaths,
           skills: [...selectedSkillIds],
         }),
-      }).then((res) => readJson<{ run: AgentRun }>(res));
+      }).then((res) => readJson<{ run?: AgentRun; queued?: boolean; node_id?: string; max_active?: number }>(res));
+
+      // ── 排队：超过并发限制时后端返回 queued，在前端显示排队状态 ──
+      if (data.queued && data.node_id) {
+        if (data.max_active) setMaxActive(data.max_active);
+        const queuedRun: AgentRun = {
+          run_id: data.node_id,
+          agent_id: agentId,
+          account_id: "",
+          status: "queued" as AgentRun["status"],
+          prompt: sentPrompt || "请处理我上传的附件。",
+          model: model || "",
+          tenant_id: "",
+          team_id: "",
+          signals: { previous_run_id: lastRealRunId, attachments: attachmentPaths },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as AgentRun;
+        setQueuedRuns((prev) => [...prev, queuedRun]);
+        setQueuedToast(true);
+        setPrompt("");
+        for (const item of pendingAttachments) { if (item.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(item.previewUrl); }
+        setPendingAttachments([]);
+        return;
+      }
+
+      if (!data.run) { setError("创建运行失败"); return; }
       const newRun: AgentRun = {
         ...data.run,
         prompt: data.run.prompt || sentPrompt || "请处理我上传的附件。",
@@ -1212,6 +1297,12 @@ export function CodingAgentChatPage() {
         {error && <div className="shrink-0 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
 
         <div ref={threadRef} className="min-h-0 flex-1 overflow-y-auto">
+          {/* ── 排队中任务指示器 ── */}
+          {queuedRuns.length > 0 && (
+            <div className="sticky top-0 z-10 border-b border-amber-200 bg-amber-50/95 px-4 py-2 text-xs text-amber-700 backdrop-blur-sm">
+              ⏳ 排队中 ({queuedRuns.length})：同时运行上限 {maxActive} 个，当前有 {queuedRuns.length} 个任务等待执行，运行中的任务完成后将自动开始
+            </div>
+          )}
           {runChain.length > 0 ? (
             <div>
               {/* Load more history button */}
@@ -1574,6 +1665,17 @@ export function CodingAgentChatPage() {
           </div>
         ) : <p className="py-8 text-center text-sm text-slate-400">暂无身份设定</p>}
       </GatewayDrawer>
+
+      {/* ── 排队居中 Toast ── */}
+      {queuedToast && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 pointer-events-none">
+          <div className="pointer-events-auto rounded-xl border border-amber-200 bg-white px-5 py-3 shadow-lg flex items-center gap-3 animate-[fadeIn_0.2s_ease-out]">
+            <span className="text-lg">⏳</span>
+            <span className="text-sm text-slate-700">同时运行任务已达上限（{maxActive}个），已加入排队，稍后自动执行</span>
+            <button type="button" onClick={() => setQueuedToast(false)} className="ml-1 text-slate-300 hover:text-slate-500 text-lg leading-none">&times;</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

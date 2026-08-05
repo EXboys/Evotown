@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { adminFetch } from "../hooks/useAdminToken";
 import type { Locale } from "../lib/i18n";
+import { SystemLogo } from "./SystemLogo";
 
 type ConfigRow = {
   key: string;
@@ -10,6 +11,7 @@ type ConfigRow = {
   label: string;
   input_type: string;
   options: string | null;
+  restart_required: boolean;
 };
 
 const COPY = {
@@ -32,6 +34,7 @@ const COPY = {
     restarting: "正在重启...",
     restartOk: "重启指令已发送，等待服务恢复...",
     restartErr: "自动重启失败，请手动执行 docker restart evotown-backend-1",
+    restartBadge: "需重启",
   },
   en: {
     title: "System Config",
@@ -52,6 +55,7 @@ const COPY = {
     restarting: "Restarting...",
     restartOk: "Restart command sent, waiting for service to recover...",
     restartErr: "Auto-restart failed. Please run: docker restart evotown-backend-1",
+    restartBadge: "Restart",
   },
 };
 
@@ -64,6 +68,7 @@ export default function SystemConfigPage({ locale = "zh" }: { locale?: Locale })
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [restartNeeded, setRestartNeeded] = useState<string[] | null>(null);
   const [restarting, setRestarting] = useState(false);
+  const [logoVer, setLogoVer] = useState(0);
 
   useEffect(() => {
     adminFetch("/api/v1/system-config/admin")
@@ -132,9 +137,7 @@ export default function SystemConfigPage({ locale = "zh" }: { locale?: Locale })
       });
       if (resp.ok) {
         setMsg({ type: "ok", text: c.logoUploaded });
-        // Add cache buster
-        const logoEl = document.querySelector<HTMLImageElement>("img[data-system-logo]");
-        if (logoEl) logoEl.src = `/system/logo.png?t=${Date.now()}`;
+        setLogoVer((v) => v + 1);
       } else {
         const data = await resp.json();
         setMsg({ type: "err", text: data.detail || c.saveErr });
@@ -252,13 +255,7 @@ export default function SystemConfigPage({ locale = "zh" }: { locale?: Locale })
         <div className="mb-4">
           <label className="block text-sm font-medium text-slate-700 mb-1">{c.logoLabel}</label>
           <div className="flex items-center gap-4">
-            <img
-              data-system-logo
-              src={`/system/logo.png?t=${Date.now()}`}
-              alt="Logo"
-              className="h-10 w-auto object-contain rounded border border-slate-200"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-            />
+            <SystemLogo className="h-10 w-auto rounded border border-slate-200" cacheBuster={logoVer} />
             <label className="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">
               {c.logoHint}
               <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={handleLogoUpload} className="hidden" />
@@ -268,7 +265,14 @@ export default function SystemConfigPage({ locale = "zh" }: { locale?: Locale })
 
         {enterpriseRows.map((row) => (
           <div key={row.key} className="mb-3">
-            <label className="block text-sm font-medium text-slate-700 mb-1">{row.label}</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              {row.label}
+              {row.restart_required && (
+                <span className="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                  {c.restartBadge}
+                </span>
+              )}
+            </label>
             {renderInput(row)}
           </div>
         ))}
@@ -281,6 +285,11 @@ export default function SystemConfigPage({ locale = "zh" }: { locale?: Locale })
           <div key={row.key} className="mb-3">
             <label className="block text-sm font-medium text-slate-700 mb-1">
               {row.label}
+              {row.restart_required && (
+                <span className="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                  {c.restartBadge}
+                </span>
+              )}
               {row.env_var && <span className="text-slate-400 font-normal ml-2">({row.env_var})</span>}
             </label>
             {renderInput(row)}

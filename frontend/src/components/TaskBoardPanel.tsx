@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { adminFetch } from "../hooks/useAdminToken";
 import { formatDateTimeShort } from "../lib/datetime";
 import { evotownEvents } from "../phaser/events";
-import type { FleetEngine } from "./DispatchPanel";
 
 type Agent = {
   agent_id: string;
@@ -43,7 +42,6 @@ type BoardResponse = {
 type ModelOption = { id: string; label: string; provider?: string };
 
 type Props = {
-  engines?: FleetEngine[];
   onRefresh?: () => void;
 };
 
@@ -81,22 +79,6 @@ const SOURCE_LABEL: Record<TaskNode["source_type"], string> = {
   dispatch_job: "派活",
   hosted_run: "托管运行",
 };
-
-const DISPATCH_RUNTIMES = [
-  { id: "", label: "默认（节点 preferred）" },
-  { id: "claude-code", label: "claude-code" },
-  { id: "hermes", label: "hermes" },
-  { id: "openclaw", label: "openclaw" },
-  { id: "codex", label: "codex" },
-] as const;
-
-function preferredRuntimeOf(engine?: FleetEngine | null): string {
-  return engine?.online_meta?.inventory_summary?.preferred_runtime?.trim() || "";
-}
-
-function isHostedEngine(engineId: string) {
-  return engineId.startsWith("hosted-ws-");
-}
 
 const PAGE_SIZE = 10;
 
@@ -146,8 +128,7 @@ function TaskCard({ node }: { node: TaskNode }) {
   );
 }
 
-export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) {
-  const [engines, setEngines] = useState<FleetEngine[]>(enginesProp);
+export function TaskBoardPanel({ onRefresh }: Props) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentId, setAgentId] = useState("");
   const [limit, setLimit] = useState(PAGE_SIZE);
@@ -163,28 +144,15 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
   const [models, setModels] = useState<ModelOption[]>([]);
   const [form, setForm] = useState({
     kind: "dispatch" as "dispatch" | "handoff" | "notify",
-    target_engine_id: "",
+    target_agent_id: "",
     target_team_id: "",
     title: "",
     message: "",
     model: "",
-    runtime: "",
     chain: false,
     chain_team: "",
     chain_message: "",
   });
-
-  useEffect(() => {
-    setEngines(enginesProp);
-  }, [enginesProp]);
-
-  const loadEngines = useCallback(async () => {
-    if (enginesProp.length) return;
-    const res = await adminFetch("/api/v1/engines/fleet");
-    if (!res.ok) return;
-    const data = (await res.json()) as { engines?: FleetEngine[] };
-    setEngines(data.engines || []);
-  }, [enginesProp.length]);
 
   const loadAgents = useCallback(async () => {
     const res = await adminFetch("/api/v1/agents?limit=200");
@@ -215,8 +183,7 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
 
   useEffect(() => {
     void loadAgents();
-    void loadEngines();
-  }, [loadAgents, loadEngines]);
+  }, [loadAgents]);
 
   useEffect(() => {
     setLimit(PAGE_SIZE);
@@ -243,13 +210,13 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
   }, []);
 
   useEffect(() => {
-    if (engines.length === 0) return;
+    if (agents.length === 0) return;
     setForm((f) => {
-      if (f.target_engine_id && engines.some((e) => e.engine_id === f.target_engine_id)) return f;
-      const preferred = engines.find((e) => e.online) || engines[0];
-      return preferred ? { ...f, target_engine_id: preferred.engine_id } : f;
+      if (f.target_agent_id && agents.some((a) => a.agent_id === f.target_agent_id)) return f;
+      const preferred = agents[0];
+      return preferred ? { ...f, target_agent_id: preferred.agent_id } : f;
     });
-  }, [engines]);
+  }, [agents]);
 
   useEffect(() => {
     const onUpdate = () => {
@@ -263,13 +230,6 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
     const empty: BoardColumns = { queued: [], running: [], done: [], failed: [] };
     return board?.columns ?? empty;
   }, [board]);
-
-  const isHostedTarget = isHostedEngine(form.target_engine_id);
-  const selectedEngine = useMemo(
-    () => engines.find((e) => e.engine_id === form.target_engine_id),
-    [engines, form.target_engine_id],
-  );
-  const nodePreferredRuntime = preferredRuntimeOf(selectedEngine);
 
   const savePolicy = async () => {
     setPolicyLoading(true);
@@ -293,29 +253,20 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
       setMessage({ tone: "err", text: "请填写任务内容" });
       return;
     }
-    if (!form.target_engine_id && !form.target_team_id) {
-      setMessage({ tone: "err", text: "请指定目标引擎或目标团队" });
+    if (!form.target_agent_id) {
+      setMessage({ tone: "err", text: "请选择目标 Agent" });
       return;
     }
     setSubmitting(true);
     const body: Record<string, unknown> = {
       kind: form.kind,
-      target_engine_id: form.target_engine_id || undefined,
+      target_agent_id: form.target_agent_id,
       target_team_id: form.target_team_id || undefined,
       title: form.title,
       message: form.message,
     };
     const payload: Record<string, unknown> = {};
     if (form.model.trim()) payload.model = form.model.trim();
-    if (!isHostedTarget) {
-      if (form.runtime.trim()) {
-        payload.runtime = form.runtime.trim();
-      } else if (nodePreferredRuntime) {
-        // Explicitly stamp preferred so queued jobs keep the binding even if Doctor reconnects later
-        payload.runtime = nodePreferredRuntime;
-        payload.runtime_source = "preferred_runtime";
-      }
-    }
     if (form.chain && form.chain_team && form.chain_message.trim()) {
       payload.on_success_handoff = {
         kind: "handoff",
@@ -348,34 +299,13 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
     }
   };
 
-  const rotateIngestToken = async (engineId: string) => {
-    if (!window.confirm(`轮换引擎 ${engineId} 的 evi_ token？旧 token 将立即失效。`)) return;
-    setMessage(null);
-    const r = await adminFetch(`/api/v1/engines/${encodeURIComponent(engineId)}/rotate-ingest-token`, {
-      method: "POST",
-    });
-    if (!r.ok) {
-      setMessage({ tone: "err", text: `轮换失败: ${(await r.text()).slice(0, 120)}` });
-      return;
-    }
-    const data = (await r.json()) as { ingest_token?: string };
-    setMessage({
-      tone: "ok",
-      text: data.ingest_token
-        ? `已轮换 ${engineId}，新 token 前缀 ${data.ingest_token.slice(0, 12)}…（仅显示一次）`
-        : `已轮换 ${engineId}`,
-    });
-    onRefresh?.();
-    void loadEngines();
-  };
-
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Task Board</div>
           <h2 className="mt-1 text-2xl font-semibold text-slate-950">任务看板</h2>
-          <p className="mt-1 text-sm text-slate-500">派活与状态流转合一：创建任务后直接在看板中跟踪。</p>
+          <p className="mt-1 text-sm text-slate-500">选择 Agent 派活，在看板中跟踪执行状态。</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
@@ -414,57 +344,26 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 bg-slate-50/60 px-3 py-2">
-          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">目标引擎</div>
-          {engines.length === 0 ? (
-            <div className="py-1 text-xs text-slate-500">暂无 Fleet 引擎</div>
+          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">目标 Agent</div>
+          {agents.length === 0 ? (
+            <div className="py-1 text-xs text-slate-500">暂无活跃 Agent</div>
           ) : (
             <div className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
-              {engines.map((e) => {
-                const hosted = isHostedEngine(e.engine_id);
-                const active = form.target_engine_id === e.engine_id;
+              {agents.map((a) => {
+                const active = form.target_agent_id === a.agent_id;
                 return (
                   <button
-                    key={e.engine_id}
+                    key={a.agent_id}
                     type="button"
-                    onClick={() =>
-                      setForm((f) => ({
-                        ...f,
-                        target_engine_id: e.engine_id,
-                        target_team_id: "",
-                        runtime: "",
-                      }))
-                    }
+                    onClick={() => setForm((f) => ({ ...f, target_agent_id: a.agent_id }))}
                     className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5 text-left transition ${
                       active
                         ? "border-slate-900 bg-slate-950 text-white shadow-sm"
                         : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                     }`}
                   >
-                    <span className={`h-2 w-2 shrink-0 rounded-full ${e.online ? "bg-emerald-500" : "bg-slate-300"}`} />
-                    <span className="max-w-[140px] truncate text-xs font-medium">{e.display_name || e.engine_id}</span>
-                    <span className={`rounded px-1 py-0.5 text-[9px] ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>
-                      {hosted ? "托管" : "conn"}
-                    </span>
-                    {!hosted && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        title="轮换 evi_ token"
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          void rotateIngestToken(e.engine_id);
-                        }}
-                        onKeyDown={(ev) => {
-                          if (ev.key === "Enter") {
-                            ev.stopPropagation();
-                            void rotateIngestToken(e.engine_id);
-                          }
-                        }}
-                        className={`text-[10px] hover:underline ${active ? "text-white/80" : "text-slate-600"}`}
-                      >
-                        ↻
-                      </span>
-                    )}
+                    <span className={`h-2 w-2 shrink-0 rounded-full bg-emerald-500`} />
+                    <span className="max-w-[140px] truncate text-xs font-medium">{a.name}</span>
                   </button>
                 );
               })}
@@ -474,17 +373,9 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
 
         <div className="space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="font-medium text-slate-700">{isHostedTarget ? "托管工作区" : "Connector"}</span>
+            <span className="font-medium text-slate-700">{agents.find((a) => a.agent_id === form.target_agent_id)?.name || "未选 Agent"}</span>
             <span className="text-slate-300">·</span>
-            <span className="truncate font-mono text-[11px]">{form.target_engine_id || "未选引擎"}</span>
-            {!isHostedTarget && nodePreferredRuntime && (
-              <>
-                <span className="text-slate-300">·</span>
-                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-800 ring-1 ring-emerald-100">
-                  preferred: {nodePreferredRuntime}
-                </span>
-              </>
-            )}
+            <span className="truncate font-mono text-[11px]">{form.target_agent_id || "未选 Agent"}</span>
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
@@ -502,36 +393,18 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
             </label>
 
             <div className="flex shrink-0 flex-col gap-2 lg:w-44">
-              {!isHostedTarget && form.target_engine_id && (
-                <select
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  value={form.runtime}
-                  onChange={(e) => setForm({ ...form, runtime: e.target.value })}
-                  aria-label="Runtime"
-                >
-                  {DISPATCH_RUNTIMES.map((item) => (
-                    <option key={item.id || "default"} value={item.id}>
-                      {item.id === "" && nodePreferredRuntime
-                        ? `默认（${nodePreferredRuntime}）`
-                        : item.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {isHostedTarget && (
-                <select
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  value={form.model}
-                  onChange={(e) => setForm({ ...form, model: e.target.value })}
-                  aria-label="模型"
-                >
-                  {models.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              )}
+              <select
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                value={form.model}
+                onChange={(e) => setForm({ ...form, model: e.target.value })}
+                aria-label="模型"
+              >
+                {models.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 disabled={submitting}
@@ -582,16 +455,16 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
                 />
               </label>
               <label className="block text-xs sm:col-span-2 lg:col-span-1">
-                <span className="mb-1 block font-medium text-slate-600">手动 engine_id</span>
+                <span className="mb-1 block font-medium text-slate-600">手动 Agent ID</span>
                 <input
-                  list="taskboard-engine-ids"
+                  list="taskboard-agent-ids"
                   className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs"
-                  value={form.target_engine_id}
-                  onChange={(e) => setForm({ ...form, target_engine_id: e.target.value })}
+                  value={form.target_agent_id}
+                  onChange={(e) => setForm({ ...form, target_agent_id: e.target.value })}
                 />
-                <datalist id="taskboard-engine-ids">
-                  {engines.map((e) => (
-                    <option key={e.engine_id} value={e.engine_id} />
+                <datalist id="taskboard-agent-ids">
+                  {agents.map((a) => (
+                    <option key={a.agent_id} value={a.agent_id} />
                   ))}
                 </datalist>
               </label>
@@ -636,77 +509,68 @@ export function TaskBoardPanel({ engines: enginesProp = [], onRefresh }: Props) 
                     onClick={() => void savePolicy()}
                     className="rounded border border-slate-200 px-2 py-1 hover:bg-white disabled:opacity-50"
                   >
-                    保存
+                    {policyLoading ? "…" : "保存"}
                   </button>
                 </div>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  格式：team:team 或 *，用英文逗号分隔（例：sales:finance,it:finance）。
+                </p>
               </details>
             </div>
           )}
         </div>
       </section>
 
-      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div>
+      )}
 
       {loading ? (
-        <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center text-sm text-slate-500">
-          加载中…
-        </div>
+        <div className="py-8 text-center text-sm text-slate-400">加载中…</div>
       ) : (
-        <>
-          <div className="text-sm text-slate-500">
-            显示最新 <span className="font-medium text-slate-800">{board?.total ?? 0}</span> 条
-            {board?.has_more ? " · 还有更早的任务" : " · 已全部加载"}
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {(Object.keys(COLUMN_META) as TaskNode["board_status"][]).map((status) => {
-              const meta = COLUMN_META[status];
-              const items = columns[status] || [];
-              return (
-                <section key={status} className="flex min-h-[420px] flex-col rounded-2xl border border-slate-200 bg-slate-50/70">
-                  <header className={`flex items-center justify-between border-b px-4 py-3 ${meta.headerClass}`}>
-                    <div>
-                      <div className="text-sm font-semibold">{meta.label}</div>
-                      <div className="text-xs opacity-70">{meta.hint}</div>
-                    </div>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${meta.countClass}`}>
-                      {items.length}
-                    </span>
-                  </header>
-                  <div className="flex-1 space-y-3 overflow-y-auto p-3">
-                    {items.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-white/60 p-6 text-center text-xs text-slate-400">
-                        暂无任务
-                      </div>
-                    ) : (
-                      items.map((node) => <TaskCard key={node.node_id} node={node} />)
-                    )}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-          {board?.has_more ? (
-            <div className="flex justify-center pt-1">
-              <button
-                type="button"
-                disabled={loadingMore}
-                onClick={() => {
-                  const next = limit + PAGE_SIZE;
-                  setLoadingMore(true);
-                  setLimit(next);
-                  void loadBoard(agentId, next, true);
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-6 py-2.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-              >
-                {loadingMore ? "加载中…" : `展开更多（再加载 ${PAGE_SIZE} 条）`}
-              </button>
-            </div>
-          ) : (
-            (board?.total ?? 0) > 0 && (
-              <div className="text-center text-xs text-slate-400">没有更多任务了</div>
-            )
-          )}
-        </>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          {(Object.keys(COLUMN_META) as TaskNode["board_status"][]).map((status) => (
+            <article
+              key={status}
+              className={`rounded-xl border ${COLUMN_META[status].headerClass} p-3`}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide">
+                  {COLUMN_META[status].label}
+                  <span className="ml-1 font-normal tracking-normal opacity-70">{COLUMN_META[status].hint}</span>
+                </span>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${COLUMN_META[status].countClass}`}>
+                  {columns[status].length}
+                </span>
+              </div>
+              {columns[status].length === 0 ? (
+                <div className="py-4 text-center text-[11px] text-slate-400">暂无</div>
+              ) : (
+                <div className="space-y-2">
+                  {columns[status].map((node) => (
+                    <TaskCard key={node.node_id} node={node} />
+                  ))}
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+
+      {board?.has_more && (
+        <div className="text-center">
+          <button
+            type="button"
+            disabled={loadingMore}
+            onClick={() => {
+              setLoadingMore(true);
+              void loadBoard(agentId, limit + PAGE_SIZE).then(() => setLimit((l) => l + PAGE_SIZE));
+            }}
+            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {loadingMore ? "加载中…" : "加载更多"}
+          </button>
+        </div>
       )}
     </div>
   );
