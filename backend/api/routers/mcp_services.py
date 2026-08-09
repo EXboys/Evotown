@@ -10,7 +10,13 @@ from pydantic import BaseModel, Field
 from core.auth import require_admin, require_console_read, require_mcp_call
 from infra import mcp_registry, agents
 
-router = APIRouter(prefix="/api/v1", tags=["mcp"])
+# REQ-017: admin + agent MCP HTTP paths run in trusted registry context so
+# mutators work; agent Bash that imports mcp_registry still cannot.
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["mcp"],
+    dependencies=[Depends(mcp_registry.mcp_registry_trusted_dependency)],
+)
 
 
 class McpPolicyUpdate(BaseModel):

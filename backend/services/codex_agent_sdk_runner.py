@@ -88,13 +88,20 @@ async def run_agent_sdk(
     if _truthy_env("EVOTOWN_CODEX_USE_GATEWAY"):
         _write_gateway_config(workspace_root)
 
-    run_env = {
-        **gateway_sdk_env(),
-        "EVOTOWN_AGENT_RUN_ID": str(run.get("run_id") or ""),
-        "EVOTOWN_WORKSPACE_ROOT": str(workspace_root),
-    }
-    if model:
-        run_env["EVOTOWN_CODEX_MODEL"] = model
+    from services.agent_subprocess_env import build_hosted_agent_env
+
+    # Codex currently runs in-process; still avoid leaking data-dir / PYTHONPATH
+    # into the temporary os.environ overlay used for the SDK call.
+    run_env = build_hosted_agent_env(
+        workspace_root=workspace_root,
+        run_id=str(run.get("run_id") or ""),
+        model="",
+        extra={
+            **gateway_sdk_env(),
+            **({"EVOTOWN_CODEX_MODEL": model} if model else {}),
+        },
+        inherit_parent=False,
+    )
 
     previous_cwd = os.getcwd()
     previous_env = {key: os.environ.get(key) for key in run_env}

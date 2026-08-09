@@ -286,13 +286,13 @@ Agent 产出按类型自动放入 workspace 子目录（downloads/、dashboard/ 
 
 Agent 子进程与 backend 共享同一个 Python 环境和容器，可直接 `from infra.mcp_registry import ...` 绕过 HTTP MCP 端点和权限检查。mcp03 已验证此问题——agent 在 `mcp_tools: 0` 的情况下通过直接 import registry 函数成功提交了 MCP 发版。
 
-**需讨论方案**：
-- 方案 A：子进程用独立 venv/容器，切断 Python import 路径
-- 方案 B：在 registry 关键函数入口加运行时调用者校验
-- 方案 C：限制 agent workspace 的 Python path，阻止 import backend 模块
-- 方案 D：其他
+**已落地（B+C，Issue #199）**：
+- **B**：`mcp_registry` 写接口要求 `contextvars` 信任上下文；仅 admin MCP HTTP router / `invoke_mcp` 置位
+- **C**：hosted agent 子进程 env 强制 `PYTHONPATH=""`，并剥离 `EVOTOWN_DATA_DIR` / `MCP_*` 等路径
 
-**状态**: 待讨论
+**残留风险**：仍可能直接 `sqlite3` 写 `/app/data/mcp_registry.db`；完整隔离见方案 A（独立 runner / bwrap）。
+
+**状态**: B+C 已实现；FS 隔离 follow-up
 
 ### REQ-018: Agent run 状态判定优化 — 非致命错误不应标记为 failed
 
