@@ -37,11 +37,14 @@ async def process_next_hosted_job() -> bool:
         return False
 
     job_id = job["job_id"]
-    engine_id = job["target_engine_id"]
-    agent_id = job.get("target_agent_id") or ""
+    agent_id = (job.get("target_agent_id") or "").strip()
     if not agent_id:
         agent_dispatch.fail_job(job_id, summary="no target agent id on job")
         return True
+
+    # claim_next_hosted_job leases under agent_id; agent-targeted jobs leave
+    # target_engine_id empty, so ack/complete must use the lease identity.
+    engine_id = (job.get("lease_engine_id") or agent_id).strip()
 
     agent = agents.get_agent(agent_id)
     if agent is None or agent.get("status") != agents.AGENT_STATUS_ACTIVE:
