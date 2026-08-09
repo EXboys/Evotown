@@ -49,3 +49,16 @@ Connector 在上报 `tool_call` ingest 事件前会调用 evaluate（需 `evi_` 
 - `secret-redaction` — 日志/文本密钥
 
 在控制台 **策略** Tab 可启用/禁用与编辑 rules JSON。
+
+## Hosted Agent：MCP registry 绕过防护（REQ-017）
+
+Hosted Coding Agent 与 backend 同容器时，Bash 曾可 `PYTHONPATH=/app python -c "from infra.mcp_registry import register_service"` 绕过 HTTP bridge 权限。
+
+**当前控制（Issue #199 B+C）**：
+
+| 层 | 机制 |
+|----|------|
+| Mutator 门禁 | `register_service` / `set_policy` / 版本与角色写路径等需 control-plane `contextvars` 信任位；仅 admin MCP API 与 `invoke_mcp` 置位 |
+| 子进程 env | `PYTHONPATH=""`；剥离 `EVOTOWN_DATA_DIR`、`MCP_SERVICES_DIR`、`MCP_DEV_DIR` 等 |
+
+**威胁模型限制**：不阻止直接读写 `mcp_registry.db`（SQLite）。彻底隔离需独立 runner / bubblewrap（方案 A）。正常 HTTP MCP call 与管理员控制台不受影响。

@@ -132,7 +132,17 @@ def invoke_mcp(service_id: str, args: dict, permissions: dict, *, tool_name: str
     """Prod invoke: handler.process(args, permissions) → wrapped {ok, data, error, version}.
 
     For source='external', routes to HTTP JSON-RPC proxy.
+    Trusted registry context (REQ-017) so system handlers may call mutators.
     """
+    from infra.mcp_registry import mcp_registry_trusted
+
+    with mcp_registry_trusted():
+        return _invoke_mcp_inner(service_id, args, permissions, tool_name=tool_name)
+
+
+def _invoke_mcp_inner(
+    service_id: str, args: dict, permissions: dict, *, tool_name: str = ""
+) -> dict[str, Any]:
     # ── Resolve source ────────────────────────────────────────────
     from infra import mcp_registry as _reg
     svc = _reg.get_service(service_id)
@@ -357,14 +367,16 @@ def fetch_external_tools(service_id: str) -> list[dict[str, Any]]:
 
 def invoke_mcp_dev(service_id: str, args: dict, permissions: dict) -> dict[str, Any]:
     """Dev invoke: load from mcp-dev/{category}/{name}/handler.py."""
+    from infra.mcp_registry import mcp_registry_trusted
 
     handler_path = _dev_handler_path(service_id)
     if not handler_path.is_file():
         return {"ok": False, "data": None, "error": f"dev handler not found: {handler_path}", "version": "0.0.0"}
 
     try:
-        module = _load_module_from_path(handler_path, f"dev:{service_id}")
-        result = module.process(args, permissions)
+        with mcp_registry_trusted():
+            module = _load_module_from_path(handler_path, f"dev:{service_id}")
+            result = module.process(args, permissions)
         version = _load_version(_dev_manifest_path(service_id))
         return {"ok": True, "data": result, "error": None, "version": version}
     except Exception as exc:

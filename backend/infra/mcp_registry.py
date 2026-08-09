@@ -3,6 +3,12 @@
 MCP services are registered by backend operators (not by frontend).
 Each workspace can be granted access with optional row-level rules.
 Agent roles manage both MCP permissions and system-level capabilities.
+
+REQ-017: mutators require a trusted control-plane context (HTTP admin /
+authorized MCP invoke). Agent subprocesses that ``import infra.mcp_registry``
+cannot register services or change policies even when they share the backend
+Python environment. Residual risk: direct SQLite writes to mcp_registry.db
+still require FS isolation (follow-up).
 """
 from __future__ import annotations
 
@@ -10,6 +16,9 @@ import json
 import os
 import sqlite3
 import uuid
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +26,46 @@ _backend_dir = Path(__file__).resolve().parent.parent
 _evotown_data = _backend_dir.parent / "data"
 
 _conn: sqlite3.Connection | None = None
+
+# True only while serving control-plane paths (admin API / invoke_mcp).
+_mcp_registry_trusted: ContextVar[bool] = ContextVar("mcp_registry_trusted", default=False)
+
+
+class McpRegistryAccessDenied(PermissionError):
+    """Mutator called outside trusted control-plane context (REQ-017)."""
+
+
+def is_mcp_registry_trusted() -> bool:
+    return bool(_mcp_registry_trusted.get())
+
+
+@contextmanager
+def mcp_registry_trusted() -> Iterator[None]:
+    """Mark the current context as allowed to call registry mutators."""
+    token = _mcp_registry_trusted.set(True)
+    try:
+        yield
+    finally:
+        _mcp_registry_trusted.reset(token)
+
+
+async def mcp_registry_trusted_dependency() -> AsyncIterator[None]:
+    """FastAPI dependency: trust registry mutators for this request."""
+    token = _mcp_registry_trusted.set(True)
+    try:
+        yield
+    finally:
+        _mcp_registry_trusted.reset(token)
+
+
+def _require_mutator(op: str) -> None:
+    if is_mcp_registry_trusted():
+        return
+    raise McpRegistryAccessDenied(
+        f"mcp_registry.{op} blocked outside trusted control-plane context "
+        "(REQ-017: use HTTP admin API or authorized MCP invoke; "
+        "direct import from agent runs is denied)"
+    )
 
 STATUS_ONLINE = "online"
 STATUS_OFFLINE = "offline"
@@ -336,6 +385,7 @@ def register_service(
     output_schema: dict[str, Any] | None = None,
     status: str = STATUS_ONLINE,
 ) -> dict[str, Any]:
+    _require_mutator("register_service")
     conn = _ensure_conn()
     sid = (service_id or f"mcp_{uuid.uuid4().hex[:12]}").strip()
     conn.execute(
@@ -370,6 +420,7 @@ def update_service(
     source: str | None = None,
     tables: list[str] | None = None,
 ) -> dict[str, Any] | None:
+    _require_mutator("update_service")
     existing = get_service(service_id)
     if existing is None:
         return None
@@ -410,6 +461,7 @@ def update_service(
 
 
 def delete_service(service_id: str) -> dict[str, Any]:
+    _require_mutator("delete_service")
     existing = get_service(service_id)
     if existing and existing.get("source") == SOURCE_SYSTEM:
         raise PermissionError("系统 MCP 不可删除")
@@ -500,6 +552,7 @@ def set_policy(
     enabled: bool,
     row_rules: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    _require_mutator("set_policy")
     conn = _ensure_conn()
     policy_id = f"pol_{uuid.uuid4().hex[:12]}"
     rules_json = json.dumps(row_rules or [], ensure_ascii=False)
@@ -518,6 +571,7 @@ def set_policy(
 
 
 def delete_policy(service_id: str, agent_id: str) -> bool:
+    _require_mutator("delete_policy")
     conn = _ensure_conn()
     cur = conn.execute(
         "DELETE FROM agent_mcp_policies WHERE service_id=? AND agent_id=?",
@@ -543,6 +597,7 @@ def get_role(role_id: str) -> dict[str, Any] | None:
 
 
 def create_role(*, name: str, description: str = "") -> dict[str, Any]:
+    _require_mutator("create_role")
     conn = _ensure_conn()
     role_id = f"role_{uuid.uuid4().hex[:10]}"
     conn.execute(
@@ -553,6 +608,7 @@ def create_role(*, name: str, description: str = "") -> dict[str, Any]:
 
 
 def update_role(role_id: str, *, name: str | None = None, description: str | None = None) -> dict[str, Any] | None:
+    _require_mutator("update_role")
     existing = get_role(role_id)
     if existing is None:
         return None
@@ -570,6 +626,7 @@ def update_role(role_id: str, *, name: str | None = None, description: str | Non
 
 
 def delete_role(role_id: str) -> bool:
+    _require_mutator("delete_role")
     conn = _ensure_conn()
     cur = conn.execute("DELETE FROM agent_roles WHERE role_id=?", (role_id,))
     conn.execute("DELETE FROM agent_role_members WHERE role_id=?", (role_id,))
@@ -596,6 +653,7 @@ def list_workspace_roles(agent_id: str) -> list[str]:
 
 
 def set_role_members(role_id: str, agent_ids: list[str]) -> list[str]:
+    _require_mutator("set_role_members")
     conn = _ensure_conn()
     conn.execute("DELETE FROM agent_role_members WHERE role_id=?", (role_id,))
     for ws_id in agent_ids:
@@ -649,6 +707,7 @@ def set_role_policy(
     enabled: bool,
     row_rules: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    _require_mutator("set_role_policy")
     conn = _ensure_conn()
     policy_id = f"rpol_{uuid.uuid4().hex[:12]}"
     rules_json = json.dumps(row_rules or [], ensure_ascii=False)
@@ -667,6 +726,7 @@ def set_role_policy(
 
 
 def delete_role_policy(service_id: str, role_id: str) -> bool:
+    _require_mutator("delete_role_policy")
     conn = _ensure_conn()
     cur = conn.execute(
         "DELETE FROM agent_role_mcp_policies WHERE service_id=? AND role_id=?",
@@ -715,6 +775,7 @@ def get_role_dimensions(role_id: str) -> list[dict[str, Any]]:
 
 def set_role_dimension(role_id: str, dim_id: str, dim_values: list[str]) -> dict[str, Any]:
     """Upsert a single role-dimension binding. dim_values=["*"] means full access."""
+    _require_mutator("set_role_dimension")
     conn = _ensure_conn()
     values_json = json.dumps(dim_values, ensure_ascii=False)
     conn.execute(
@@ -730,6 +791,7 @@ def set_role_dimension(role_id: str, dim_id: str, dim_values: list[str]) -> dict
 
 def delete_role_dimension(role_id: str, dim_id: str) -> bool:
     """Remove a single role-dimension binding."""
+    _require_mutator("delete_role_dimension")
     conn = _ensure_conn()
     cur = conn.execute(
         "DELETE FROM agent_role_dimensions WHERE role_id=? AND dim_id=?",
@@ -744,6 +806,7 @@ def set_role_dimensions_batch(role_id: str, dimensions: list[dict[str, Any]]) ->
     Each item: {dim_id: str, dim_values: list[str]}.
     Returns the number of dimensions set.
     """
+    _require_mutator("set_role_dimensions_batch")
     conn = _ensure_conn()
     conn.execute("DELETE FROM agent_role_dimensions WHERE role_id=?", (role_id,))
     count = 0
@@ -1091,6 +1154,7 @@ def _validate_code(code: str) -> str:
 
 
 def create_dimension(*, dim_id: str = "", label: str, db_connection_id: str, table_name: str, column_name: str, db_name: str = "", code: str = "") -> dict[str, Any]:
+    _require_mutator("create_dimension")
     conn = _ensure_conn()
     _validate_connection(db_connection_id)
     code_val = _validate_code(code)
@@ -1106,6 +1170,7 @@ def create_dimension(*, dim_id: str = "", label: str, db_connection_id: str, tab
 
 
 def update_dimension(dim_id: str, *, label: str | None = None, table_name: str | None = None, column_name: str | None = None, db_name: str | None = None, code: str | None = None) -> dict[str, Any] | None:
+    _require_mutator("update_dimension")
     existing = _ensure_conn().execute(
         "SELECT * FROM system_dimension_registry WHERE dim_id=?", (dim_id,)
     ).fetchone()
@@ -1141,6 +1206,7 @@ def update_dimension(dim_id: str, *, label: str | None = None, table_name: str |
 
 
 def delete_dimension(dim_id: str) -> bool:
+    _require_mutator("delete_dimension")
     conn = _ensure_conn()
     cur = conn.execute("DELETE FROM system_dimension_registry WHERE dim_id=?", (dim_id,))
     return cur.rowcount > 0
@@ -1386,6 +1452,7 @@ def create_service_version(
     submitted_by_account: str = "",
 ) -> dict[str, Any]:
     """Create a new service version record (pending review). Returns the created record."""
+    _require_mutator("create_service_version")
     conn = _ensure_conn()
     version_id = f"ver_{uuid.uuid4().hex[:12]}"
     conn.execute(
@@ -1440,6 +1507,7 @@ def update_service_version_status(
     reviewed_by: str = "",
     review_comment: str = "",
 ) -> bool:
+    _require_mutator("update_service_version_status")
     conn = _ensure_conn()
     cur = conn.execute(
         """UPDATE mcp_service_versions

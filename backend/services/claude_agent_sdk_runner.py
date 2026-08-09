@@ -153,6 +153,20 @@ class ClaudeCodeRunner:
 
         permission_mode = os.environ.get("EVOTOWN_CLAUDE_PERMISSION_MODE", "acceptEdits").strip() or "acceptEdits"
 
+        from services.agent_subprocess_env import build_hosted_agent_env
+
+        sdk_env = build_hosted_agent_env(
+            workspace_root=workspace_root,
+            run_id=context.run_id,
+            model=model,
+            extra={
+                **gateway_sdk_env(agent_id=context.agent_id),
+                "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+                "CLAUDE_CODE_SIMPLE": "1",
+            },
+            inherit_parent=False,
+        )
+
         options_kwargs: dict[str, Any] = {
             "cwd": workspace_root,
             "model": model or None,
@@ -160,12 +174,7 @@ class ClaudeCodeRunner:
             "allowed_tools": self._allowed_tools(),
             "mcp_servers": self._mcp_servers(workspace_root),
             "setting_sources": ["project"],
-            "env": {
-                **gateway_sdk_env(agent_id=context.agent_id),
-                "EVOTOWN_AGENT_RUN_ID": context.run_id,
-                "EVOTOWN_WORKSPACE_ROOT": str(workspace_root),
-                "EVOTOWN_CLAUDE_MODEL": model,
-            },
+            "env": sdk_env,
         }
 
         # Resume previous Claude session (native context management)
@@ -438,32 +447,28 @@ class ClaudeCodeRunner:
         context: AgentRunContext,
         model: str,
     ) -> dict[str, str]:
+        from services.agent_subprocess_env import build_hosted_agent_env
+
         gateway_env = gateway_sdk_env(agent_id=context.agent_id)
         api_key = gateway_env.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        # Strip sensitive env vars before passing to agent subprocess
-        _STRIP_ENV_PREFIXES = (
-            "ADMIN_", "EVOTOWN_DATABASE_MCP_", "EVOTOWN_DEV_",
-            "EVOTOWN_ENGINE_INGEST_",
-        )
-        stripped_env = {
-            k: v for k, v in os.environ.items()
-            if not any(k.startswith(p) for p in _STRIP_ENV_PREFIXES)
-        }
-        env: dict[str, str] = {
-            **stripped_env,
+        extra: dict[str, str] = {
             "NODE_TLS_REJECT_UNAUTHORIZED": "0",
             "CLAUDE_CODE_SIMPLE": "1",
             "ANTHROPIC_API_KEY": api_key,
-            "EVOTOWN_AGENT_RUN_ID": context.run_id,
-            "EVOTOWN_WORKSPACE_ROOT": str(workspace_root),
-            "EVOTOWN_CLAUDE_MODEL": model,
+            **{k: str(v) for k, v in gateway_env.items()},
         }
         if gateway_env.get("ANTHROPIC_BASE_URL"):
-            env["ANTHROPIC_BASE_URL"] = gateway_env["ANTHROPIC_BASE_URL"]
+            extra["ANTHROPIC_BASE_URL"] = gateway_env["ANTHROPIC_BASE_URL"]
         elif api_key:
-            env.setdefault("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-        env.update({k: str(v) for k, v in gateway_env.items() if k not in env})
-        return env
+            extra.setdefault("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+
+        return build_hosted_agent_env(
+            workspace_root=workspace_root,
+            run_id=context.run_id,
+            model=model,
+            extra=extra,
+            inherit_parent=True,
+        )
 
     @staticmethod
     def _parse_cli_output(raw_output: str) -> tuple[str, str]:
