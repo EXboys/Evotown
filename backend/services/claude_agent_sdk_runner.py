@@ -20,6 +20,22 @@ logger = logging.getLogger(__name__)
 
 _SDK_IMPORT_ERROR: str | None = None
 
+_RECOVERABLE_RESUME_ERROR_MARKERS = (
+    "session expired",
+    "session not found",
+    "invalid session",
+    "unknown session",
+    "conversation not found",
+    "cannot resume",
+    "failed to resume",
+    "maximum context length",
+    "context length",
+    "context window",
+    "too many tokens",
+    "prompt is too long",
+    "input is too long",
+)
+
 
 def sdk_available() -> bool:
     """Return True when claude-agent-sdk is importable."""
@@ -40,6 +56,19 @@ def sdk_import_error() -> str | None:
 
 def _truthy_env(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_recoverable_resume_error(exc: Exception) -> bool:
+    """Return whether a fresh bounded session can resolve a resume failure."""
+    parts = [str(exc)]
+    body = getattr(exc, "body", None)
+    if body:
+        try:
+            parts.append(json.dumps(body, ensure_ascii=False))
+        except (TypeError, ValueError):
+            parts.append(str(body))
+    message = " ".join(parts).lower()
+    return any(marker in message for marker in _RECOVERABLE_RESUME_ERROR_MARKERS)
 
 
 def gateway_sdk_env(*, agent_id: str = "") -> dict[str, str]:
@@ -194,6 +223,7 @@ class ClaudeCodeRunner:
         log_lines: list[str] = []
         exit_code = 1
         claude_session_id = ""
+        active_prompt = prompt
         _emitted_texts: set[str] = set()
         # Buffer while attempting resume so a failed resume never reaches the UI.
         _buffer_only = bool(context.resume_session_id)
@@ -224,7 +254,7 @@ class ClaudeCodeRunner:
 
         async def _query():
             nonlocal exit_code, claude_session_id
-            async for message in query(prompt=prompt, options=options):
+            async for message in query(prompt=active_prompt, options=options):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         text = getattr(block, "text", None)
@@ -263,15 +293,25 @@ class ClaudeCodeRunner:
         try:
             await _query()
             _flush_buffer()
-        except Exception:
-            if not context.resume_session_id:
+        except Exception as exc:
+            if not context.resume_session_id or not _is_recoverable_resume_error(exc):
                 raise
             sid_prefix = context.resume_session_id[:12]
-            logger.info("claude session %s... expired/broken, starting fresh", sid_prefix)
+            fallback_reason = str(exc).strip() or exc.__class__.__name__
+            logger.info(
+                "claude session %s... cannot resume (%s), starting bounded fresh session",
+                sid_prefix,
+                fallback_reason[:200],
+            )
             _buffer.clear()
             log_lines.clear()
             _emitted_texts.clear()
             _buffer_only = False  # fresh run streams live
+            if context.on_context_fallback is not None:
+                try:
+                    context.on_context_fallback(fallback_reason)
+                except Exception:
+                    logger.exception("on_context_fallback failed for run %s", context.run_id)
             if context.on_stream_reset is not None:
                 try:
                     context.on_stream_reset()
@@ -281,6 +321,7 @@ class ClaudeCodeRunner:
             options = ClaudeAgentOptions(**options_kwargs)
             exit_code = 1
             claude_session_id = ""
+            active_prompt = context.fallback_prompt.strip() or prompt
             await _query()
 
         output = "\n".join(line for line in log_lines if line).strip()

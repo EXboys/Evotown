@@ -22,6 +22,7 @@ DEFAULT_MODEL = "claude-sonnet-4"
 DEFAULT_ENGINE_ID = "claude-code-hosted"
 DEFAULT_RUN_TIMEOUT_SEC = 600
 DEFAULT_MAX_TURNS = 100
+DEFAULT_HISTORY_TOKEN_BUDGET = 32_768
 
 # DEFAULT_RUN_TIMEOUT_SEC is synced from system.db → env on startup.
 # For module-level access, read os.environ (no inline fallback).
@@ -325,7 +326,7 @@ def _materialize_skills(workspace: dict[str, Any], skill_ids: list[str]) -> list
 
 
 def _get_conversation_history(previous_run_id: str, *, max_rounds: int = 20) -> list[dict[str, Any]]:
-    """Walk the previous_run_id chain backwards to collect full conversation history."""
+    """Walk the previous_run_id chain backwards to collect fallback history."""
     history: list[dict[str, Any]] = []
     current_id = previous_run_id.strip()
     seen: set[str] = set()
@@ -343,22 +344,111 @@ def _get_conversation_history(previous_run_id: str, *, max_rounds: int = 20) -> 
     return history
 
 
-def _build_conversation_prompt(current_prompt: str, history: list[dict[str, Any]]) -> str:
-    """Build a prompt that includes full conversation history."""
-    if not history:
-        return current_prompt
-    lines = ["[以下是之前的对话历史，请基于此上下文回复用户的新消息]"]
-    for i, h in enumerate(history, 1):
-        lines.append(f"第{i}轮:")
-        lines.append(f"  用户: {h.get('prompt', '')}")
-        attachment_note = _attachment_prompt_suffix(h.get("signals") or {})
-        if attachment_note:
-            lines.append(f"  {attachment_note}")
-        result = str(h.get("result_summary") or h.get("log_excerpt") or "")
-        lines.append(f"  助手: {result}")
-    lines.append(f"---")
-    lines.append(f"用户的新消息: {current_prompt}")
+def _history_token_budget() -> int:
+    raw = os.environ.get("EVOTOWN_CLAUDE_HISTORY_TOKEN_BUDGET", "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_HISTORY_TOKEN_BUDGET
+    except ValueError:
+        value = DEFAULT_HISTORY_TOKEN_BUDGET
+    return max(1_024, min(value, 262_144))
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    try:
+        import tiktoken
+
+        return len(tiktoken.get_encoding("cl100k_base").encode(text))
+    except (ImportError, KeyError):
+        # Conservative for mixed CJK/code when the tokenizer is unavailable.
+        return max(1, (len(text) + 2) // 3)
+
+
+def _truncate_to_token_budget(text: str, max_tokens: int) -> str:
+    if max_tokens <= 0:
+        return ""
+    if _estimate_tokens(text) <= max_tokens:
+        return text
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if _estimate_tokens(text[:mid]) <= max_tokens:
+            low = mid
+        else:
+            high = mid - 1
+    suffix = "\n[较早内容已按上下文预算截断]"
+    prefix_budget = max(0, max_tokens - _estimate_tokens(suffix))
+    if prefix_budget <= 0:
+        return text[:low]
+    prefix = text[:low]
+    while prefix and _estimate_tokens(prefix + suffix) > max_tokens:
+        prefix = prefix[:-1]
+    return prefix + suffix
+
+
+def _conversation_round_text(index: int, run: dict[str, Any]) -> str:
+    lines = [f"第{index}轮:", f"  用户: {run.get('prompt', '')}"]
+    attachment_note = _attachment_prompt_suffix(run.get("signals") or {})
+    if attachment_note:
+        lines.append(f"  {attachment_note}")
+    result = str(run.get("result_summary") or run.get("log_excerpt") or "")
+    lines.append(f"  助手: {result}")
     return "\n".join(lines)
+
+
+def _build_bounded_conversation_prompt(
+    current_prompt: str,
+    history: list[dict[str, Any]],
+    *,
+    token_budget: int | None = None,
+) -> tuple[str, dict[str, int]]:
+    """Build recent-first fallback history within a deterministic token budget."""
+    if not history:
+        return current_prompt, {
+            "history_rounds": 0,
+            "history_tokens": 0,
+            "prompt_tokens": _estimate_tokens(current_prompt),
+        }
+
+    budget = token_budget if token_budget is not None else _history_token_budget()
+    prefix = "[以下是之前对话的有界摘要，请基于此上下文回复用户的新消息]"
+    current_block = f"---\n用户的新消息: {current_prompt}"
+    fixed_tokens = _estimate_tokens(prefix) + _estimate_tokens(current_block) + 8
+    remaining = max(0, budget - fixed_tokens)
+    selected: list[tuple[int, str]] = []
+
+    # Newest rounds carry the most useful state. Include one partial round when
+    # the next complete round would exceed the remaining budget.
+    for index in range(len(history), 0, -1):
+        round_text = _conversation_round_text(index, history[index - 1])
+        round_tokens = _estimate_tokens(round_text) + 2
+        if round_tokens <= remaining:
+            selected.append((index, round_text))
+            remaining -= round_tokens
+            continue
+        if not selected and remaining > 32:
+            selected.append((index, _truncate_to_token_budget(round_text, remaining)))
+        break
+
+    selected.reverse()
+    lines = [prefix, *(text for _index, text in selected), current_block]
+    prompt = "\n".join(lines)
+    if _estimate_tokens(prompt) > budget:
+        # The current user message is API-bounded, but keep a final hard guard
+        # for deployments that bypass that schema.
+        prompt = _truncate_to_token_budget(prompt, budget)
+    history_tokens = sum(_estimate_tokens(text) for _index, text in selected)
+    return prompt, {
+        "history_rounds": len(selected),
+        "history_tokens": history_tokens,
+        "prompt_tokens": _estimate_tokens(prompt),
+    }
+
+
+def _build_conversation_prompt(current_prompt: str, history: list[dict[str, Any]]) -> str:
+    """Backward-compatible wrapper for bounded fallback prompt construction."""
+    return _build_bounded_conversation_prompt(current_prompt, history)[0]
 
 
 def _attachment_prompt_suffix(signals: dict[str, Any]) -> str:
@@ -492,37 +582,29 @@ def derive_run_completion(
 def _write_conversation_context(
     workspace: dict[str, Any],
     previous_run_id: str,
-) -> dict[str, Any] | None:
-    """Fetch previous run's prompt+result and write conversation context to workspace."""
-    if not previous_run_id.strip():
+    bounded_prompt: str,
+) -> Path | None:
+    """Write bounded fallback context for inspection without auto-injecting it."""
+    root = agents.resolve_agent_path(workspace)
+    path = root / ".evotown" / "conversation_context.md"
+    if not previous_run_id.strip() or not bounded_prompt.strip():
+        path.unlink(missing_ok=True)
         return None
-    prev = claude_agent_runs.get_run(previous_run_id.strip())
-    if prev is None:
-        return None
-    prev_prompt = str(prev.get("prompt") or "")
-    prev_result = str(prev.get("result_summary") or prev.get("log_excerpt") or "")
-    if not prev_prompt and not prev_result:
-        return None
-
     lines = [
         "# Conversation Continuation",
         "",
-        "You are continuing a conversation. Use the context below to maintain continuity.",
+        "Bounded fallback context prepared for a fresh session.",
+        "The same context is already included in the fallback prompt; do not load this file automatically.",
         "",
-        f"## Previous message (run `{prev['run_id']}`)",
+        f"Previous run: `{previous_run_id}`",
         "",
-        prev_prompt,
+        bounded_prompt,
     ]
-    if prev_result.strip():
-        lines.extend(["", "## Your previous response", "", prev_result])
     content = "\n".join(lines)
-
-    root = agents.resolve_agent_path(workspace)
     evotown_dir = root / ".evotown"
     evotown_dir.mkdir(parents=True, exist_ok=True)
-    path = evotown_dir / "conversation_context.md"
     path.write_text(content, encoding="utf-8")
-    return prev
+    return path
 
 
 def _render_agent_context_md(
@@ -626,17 +708,25 @@ def _render_agent_context_md(
             "",
         ]
     )
-    conversation_hint = (
-        "This is a **continuation** of a previous conversation. "
-        "Read `.evotown/conversation_context.md` for the prior exchange."
-    )
     prev_run_id = str((run.get("signals") or {}).get("previous_run_id") or "").strip()
-    if prev_run_id:
+    context_mode = str((run.get("signals") or {}).get("context_mode") or "")
+    if prev_run_id and context_mode == "resume":
         lines.extend(
             [
                 "## Conversation History",
                 "",
-                conversation_hint,
+                "This run resumes the native Claude session. Do not read "
+                "`.evotown/conversation_context.md`; prior turns are already in the session.",
+                "",
+            ]
+        )
+    elif prev_run_id and context_mode == "fallback":
+        lines.extend(
+            [
+                "## Conversation History",
+                "",
+                "A token-bounded conversation summary is already included in the user prompt. "
+                "Do not read `.evotown/conversation_context.md` unless debugging is explicitly requested.",
                 "",
             ]
         )
@@ -942,10 +1032,41 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
     selected_skills = list(signals.get("selected_skills") or [])
     previous_run_id = str(signals.get("previous_run_id") or "").strip()
     attachment_paths = [str(p).strip() for p in (signals.get("attachments") or []) if str(p).strip()]
-    _write_conversation_context(workspace, previous_run_id)
     history = _get_conversation_history(previous_run_id)
-    prompt = _build_conversation_prompt(run["prompt"], history)
+    fallback_prompt, history_stats = _build_bounded_conversation_prompt(run["prompt"], history)
+
+    # Resume only the explicitly linked conversation. Falling back to an
+    # unrelated recent run can cross session boundaries and duplicate history.
+    resume_session_id = ""
+    if runtime_engine == "claude" and previous_run_id:
+        prev_run = claude_agent_runs.get_run(previous_run_id)
+        if prev_run:
+            prev_signals = prev_run.get("signals") or {}
+            resume_session_id = str(prev_signals.get("claude_session_id") or "").strip()
+
+    context_mode = "resume" if resume_session_id else ("fallback" if history else "fresh")
+    signals["context_mode"] = context_mode
+    signals["history_token_budget"] = _history_token_budget()
+    run["signals"] = signals
+    if context_mode == "fallback":
+        _write_conversation_context(workspace, previous_run_id, fallback_prompt)
+    else:
+        _write_conversation_context(workspace, "", "")
+
+    prompt = str(run["prompt"]) if context_mode == "resume" else fallback_prompt
     prompt = _append_attachments_to_prompt(prompt, workspace, attachment_paths)
+    fallback_prompt = _append_attachments_to_prompt(fallback_prompt, workspace, attachment_paths)
+    claude_agent_runs.append_event(
+        run_id,
+        "context.history",
+        {
+            "mode": context_mode,
+            "history_rounds": history_stats["history_rounds"],
+            "history_tokens": history_stats["history_tokens"],
+            "fallback_prompt_tokens": history_stats["prompt_tokens"],
+            "token_budget": _history_token_budget(),
+        },
+    )
 
     # Prepend identity profile to prompt so model sees it before runner default identity
     if ws_profile and ws_profile.get("soul"):
@@ -956,6 +1077,7 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
             parts.append(ws_profile["standards"])
         identity = "\n\n".join(parts) + "\n\n-------------------\n\n"
         prompt = identity + prompt
+        fallback_prompt = identity + fallback_prompt
 
     # Prepend mandatory skill instructions to prompt so model prioritizes them
     if selected_skills:
@@ -975,6 +1097,7 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
             "\n-------------------\n\n"
         )
         prompt = mandatory_block + prompt
+        fallback_prompt = mandatory_block + fallback_prompt
 
     vision_text = ""
     from services import workspace_vision
@@ -1007,6 +1130,7 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
                 {"reason": "EVOTOWN_CLAUDE_VISION_MODEL 未配置"},
             )
         prompt = _append_vision_to_prompt(prompt, vision_text, image_paths)
+        fallback_prompt = _append_vision_to_prompt(fallback_prompt, vision_text, image_paths)
 
     identity = _runner_identity(run)
     skill_account_id = agents.get_agent_owner(workspace["agent_id"]) or str(identity.get("account_id") or "")
@@ -1052,25 +1176,6 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
     from services import claude_agent_sdk_runner as _casr
 
     gateway_env = _casr.gateway_sdk_env(agent_id=str(run.get("agent_id") or ""))
-    resume_session_id = ""
-    prev_rid = str(signals.get("previous_run_id") or "").strip()
-    if prev_rid:
-        prev_run = claude_agent_runs.get_run(prev_rid)
-        if prev_run:
-            prev_signals = prev_run.get("signals") or {}
-            resume_session_id = str(prev_signals.get("claude_session_id") or "").strip()
-    if not resume_session_id:
-        agent_id = str(run.get("agent_id") or "")
-        if agent_id:
-            recent = claude_agent_runs.list_runs(agent_id=agent_id, limit=2)
-            if isinstance(recent, dict):
-                latest_runs = recent.get("runs") or []
-                for candidate in latest_runs:
-                    if candidate.get("run_id") != run.get("run_id"):
-                        sid = candidate.get("signals") or {}
-                        resume_session_id = str(sid.get("claude_session_id") or "").strip()
-                        break
-
     ctx = AgentRunContext(
         run_id=run["run_id"],
         agent_id=str(run.get("agent_id") or ""),
@@ -1082,6 +1187,7 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
         gateway_base_url=gateway_env.get("ANTHROPIC_BASE_URL", ""),
         gateway_api_key=gateway_env.get("ANTHROPIC_API_KEY", ""),
         resume_session_id=resume_session_id,
+        fallback_prompt=fallback_prompt,
     )
 
     def on_msg(text: str) -> None:
@@ -1092,7 +1198,21 @@ async def run_claude_agent(run_id: str) -> dict[str, Any]:
         # Resume 失败重跑前清掉已流式写入的正文，避免 UI 叠两份回复
         claude_agent_runs.clear_streaming_output(run_id)
 
+    def on_context_fallback(reason: str) -> None:
+        signals["context_mode"] = "fallback"
+        signals["context_fallback_reason"] = reason[:200]
+        claude_agent_runs.append_event(
+            run_id,
+            "context.fallback",
+            {
+                "mode": "fallback",
+                "reason": reason[:200],
+                "fallback_prompt_tokens": _estimate_tokens(fallback_prompt),
+            },
+        )
+
     ctx.on_stream_reset = on_stream_reset
+    ctx.on_context_fallback = on_context_fallback
 
     try:
         agent_coro = _run_agent(
