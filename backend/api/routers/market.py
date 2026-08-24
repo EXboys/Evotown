@@ -100,6 +100,17 @@ async def list_market_skills(
     }
 
 
+@router.get("/skill-stats")
+async def list_market_skill_stats(
+    skill_id: str | None = None,
+    _session: dict | None = Depends(require_console_read),
+):
+    """Employee-facing skill efficacy rollup for Agent Doctor Skills panel."""
+    del _session
+    ids = [skill_id] if skill_id else None
+    return {"skills": skill_market.list_skill_stats(skill_ids=ids)}
+
+
 @router.get("/skills/{skill_id}")
 async def get_market_skill(skill_id: str, _session: dict | None = Depends(require_console_read)):
     del _session
