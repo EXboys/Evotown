@@ -1712,3 +1712,87 @@ def record_skill_usage(
             _json_dumps(details or {}),
         ),
     )
+
+
+_EXECUTE_EVENTS = frozenset({"execute", "invoke", "load", "run"})
+
+
+def list_skill_stats(*, skill_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    """Aggregate download + execution efficacy for employee / Agent Doctor UI.
+
+    Execution metrics come from skill_usage_log events (execute/invoke/load/run).
+    When runtimes have not yet emitted those events, call/success fields are null
+    while download_count remains available.
+    """
+    conn = _ensure_conn()
+    skills = list_market_skills(limit=500)
+    if skill_ids:
+        wanted = {sid.strip() for sid in skill_ids if sid and sid.strip()}
+        skills = [s for s in skills if s.get("skill_id") in wanted]
+
+    rows = conn.execute(
+        """
+        SELECT skill_id, agent_id, event, details, created_at
+        FROM skill_usage_log
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+
+    by_skill: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        by_skill.setdefault(str(row["skill_id"]), []).append(row)
+
+    results: list[dict[str, Any]] = []
+    for skill in skills:
+        skill_id = str(skill.get("skill_id") or "")
+        events = by_skill.get(skill_id, [])
+        agents: list[str] = []
+        seen_agents: set[str] = set()
+        call_count = 0
+        success_count = 0
+        first_outcomes: dict[str, bool] = {}
+
+        for row in events:
+            agent_id = str(row["agent_id"] or "").strip()
+            if agent_id and agent_id not in seen_agents:
+                seen_agents.add(agent_id)
+                agents.append(agent_id)
+            event = str(row["event"] or "").strip().lower()
+            if event not in _EXECUTE_EVENTS:
+                continue
+            call_count += 1
+            details = _json_loads(row["details"] or "{}", {})
+            ok = details.get("success")
+            if ok is None:
+                ok = details.get("ok")
+            if ok is None and event.endswith("success"):
+                ok = True
+            if ok is None and event.endswith("fail"):
+                ok = False
+            succeeded = bool(ok) if ok is not None else False
+            if succeeded:
+                success_count += 1
+            if agent_id and agent_id not in first_outcomes:
+                first_outcomes[agent_id] = succeeded
+
+        success_rate = (success_count / call_count) if call_count else None
+        first_success_rate = (
+            (sum(1 for v in first_outcomes.values() if v) / len(first_outcomes))
+            if first_outcomes
+            else None
+        )
+
+        results.append(
+            {
+                "skill_id": skill_id,
+                "name": skill.get("name") or skill_id,
+                "version": skill.get("version"),
+                "download_count": int(skill.get("download_count") or 0),
+                "call_count": call_count if call_count else None,
+                "success_count": success_count if call_count else None,
+                "success_rate": success_rate,
+                "first_success_rate": first_success_rate,
+                "agents": agents,
+            }
+        )
+    return results

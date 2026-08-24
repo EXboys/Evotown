@@ -29,6 +29,37 @@ class SkillMarketStoreTest(unittest.TestCase):
         self.assertEqual(manifest["bundle_id"], "default-agent-skills")
         self.assertGreaterEqual(len(manifest["skills"]), 1)
 
+    def test_list_skill_stats_aggregates_execute_events(self) -> None:
+        skill_market.record_skill_usage(
+            skill_id="calculator",
+            agent_id="agent-a",
+            event="execute",
+            details={"success": True},
+        )
+        skill_market.record_skill_usage(
+            skill_id="calculator",
+            agent_id="agent-a",
+            event="execute",
+            details={"success": False},
+        )
+        skill_market.record_skill_usage(
+            skill_id="calculator",
+            agent_id="agent-b",
+            event="execute",
+            details={"success": True},
+        )
+        stats = {
+            item["skill_id"]: item
+            for item in skill_market.list_skill_stats(skill_ids=["calculator"])
+        }
+        self.assertIn("calculator", stats)
+        row = stats["calculator"]
+        self.assertEqual(row["call_count"], 3)
+        self.assertEqual(row["success_count"], 2)
+        self.assertAlmostEqual(row["success_rate"], 2 / 3)
+        self.assertAlmostEqual(row["first_success_rate"], 1.0)
+        self.assertEqual(row["agents"], ["agent-a", "agent-b"])
+
 
 class SkillMarketApiTest(unittest.TestCase):
     def setUp(self) -> None:
