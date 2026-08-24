@@ -380,6 +380,7 @@ class CodingAgentApiTest(unittest.TestCase):
         self.assertEqual(updated["status"], "succeeded")
         self.assertEqual(updated["signals"]["execution_backend"], "sdk")
         self.assertTrue(updated["signals"]["sdk_command_configured"])
+        self.assertEqual(updated["signals"]["claude_session_id"], "sess_test_123")
         self.assertIn("embedded SDK", updated["result_summary"])
 
     def test_runner_gateway_env_marks_sdk_ready(self) -> None:
@@ -721,6 +722,52 @@ class CodingAgentApiTest(unittest.TestCase):
         self.assertEqual(updated["status"], "failed")
         self.assertEqual(updated["signals"]["completion_status"], "failed")
 
+    def test_resume_sends_only_current_turn_and_prepares_bounded_fallback(self) -> None:
+        from infra import claude_agent_runs, agents
+        from services import claude_code_runner
+
+        account, _secret = self._account_key("ResumeContextUser")
+        ws = agents.create_agent(account_id=account["account_id"], name="Resume Context")
+        first = claude_agent_runs.create_run(
+            agent_id=ws["agent_id"],
+            account_id=account["account_id"],
+            prompt="old user turn",
+            model="claude-test",
+        )
+        claude_agent_runs.update_run_status(
+            first["run_id"],
+            status="succeeded",
+            result_summary="old assistant summary",
+            signals={"claude_session_id": "session-old"},
+        )
+        second = claude_agent_runs.create_run(
+            agent_id=ws["agent_id"],
+            account_id=account["account_id"],
+            prompt="current user turn",
+            model="claude-test",
+            signals={"previous_run_id": first["run_id"], "runtime_engine": "claude"},
+        )
+
+        captured: dict[str, object] = {}
+
+        async def fake_run(*, workspace_root, prompt, run, model, runtime_engine="claude", context=None, on_message=None):
+            del workspace_root, run, model, runtime_engine, on_message
+            captured["prompt"] = prompt
+            captured["context"] = context
+            return 0, "done", "", "sdk"
+
+        with patch("services.claude_code_runner._run_agent", new=AsyncMock(side_effect=fake_run)):
+            updated = asyncio.run(claude_code_runner.run_claude_agent(second["run_id"]))
+
+        context = captured["context"]
+        self.assertEqual(captured["prompt"], "current user turn")
+        self.assertEqual(context.resume_session_id, "session-old")
+        self.assertIn("old user turn", context.fallback_prompt)
+        self.assertIn("old assistant summary", context.fallback_prompt)
+        self.assertEqual(updated["signals"]["context_mode"], "resume")
+        root = agents.resolve_agent_path(ws)
+        self.assertFalse((root / ".evotown" / "conversation_context.md").exists())
+
 
 class ClaudeRunModelResolveTest(unittest.TestCase):
     def test_resolve_run_model_prefers_explicit(self) -> None:
@@ -854,6 +901,8 @@ class ClaudeSdkResumeFallbackTest(unittest.TestCase):
 
         resets: list[int] = []
         emitted: list[str] = []
+        fallbacks: list[str] = []
+        prompts: list[str] = []
 
         class _Assistant:
             def __init__(self, text: str) -> None:
@@ -870,9 +919,10 @@ class ClaudeSdkResumeFallbackTest(unittest.TestCase):
 
         async def fake_query(*, prompt, options):  # noqa: ANN001
             call_count["n"] += 1
+            prompts.append(prompt)
             if getattr(options, "resume", None) or (isinstance(options, dict) and options.get("resume")):
                 yield _Assistant("stale resume answer")
-                raise RuntimeError("session expired")
+                raise RuntimeError("maximum context length exceeded")
             yield _Assistant("fresh answer only")
             yield _Result()
 
@@ -891,7 +941,9 @@ class ClaudeSdkResumeFallbackTest(unittest.TestCase):
             run_id="run_test",
             agent_id="agt_test",
             resume_session_id="b75fdbd1-4020-expired",
+            fallback_prompt="bounded fallback history",
             on_stream_reset=lambda: resets.append(1),
+            on_context_fallback=fallbacks.append,
         )
 
         with patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk}), patch.object(
@@ -912,11 +964,97 @@ class ClaudeSdkResumeFallbackTest(unittest.TestCase):
             )
 
         self.assertEqual(call_count["n"], 2)
+        self.assertEqual(prompts, ["open baidu", "bounded fallback history"])
         self.assertEqual(resets, [1])
+        self.assertEqual(fallbacks, ["maximum context length exceeded"])
         self.assertEqual(emitted, ["fresh answer only"])
         self.assertEqual(result.output, "fresh answer only")
+        self.assertEqual(result.raw_output, "new-session")
         self.assertNotIn("expired", result.output)
         self.assertNotIn("starting fresh", result.output)
+
+    def test_nonrecoverable_resume_error_is_not_retried(self) -> None:
+        import asyncio
+        import sys
+        from types import ModuleType
+        from unittest.mock import MagicMock, patch
+
+        from services.agent_runner_base import AgentRunContext
+        from services import claude_agent_sdk_runner
+
+        calls: list[str] = []
+
+        async def fake_query(*, prompt, options):  # noqa: ANN001
+            calls.append(prompt)
+            raise RuntimeError("authentication failed: invalid API key")
+            yield  # pragma: no cover
+
+        class _Options:
+            def __init__(self, **kwargs):  # noqa: ANN003
+                self.__dict__.update(kwargs)
+
+        fake_sdk = ModuleType("claude_agent_sdk")
+        fake_sdk.AssistantMessage = object  # type: ignore[attr-defined]
+        fake_sdk.ResultMessage = object  # type: ignore[attr-defined]
+        fake_sdk.ClaudeAgentOptions = _Options  # type: ignore[attr-defined]
+        fake_sdk.query = fake_query  # type: ignore[attr-defined]
+
+        runner = claude_agent_sdk_runner.ClaudeCodeRunner()
+        ctx = AgentRunContext(
+            run_id="run_auth",
+            agent_id="agt_test",
+            resume_session_id="old-session",
+            fallback_prompt="must not be sent",
+        )
+
+        with patch.dict(sys.modules, {"claude_agent_sdk": fake_sdk}), patch.object(
+            runner, "resolve_backend", return_value="sdk"
+        ), patch.object(runner, "_system_prompt", return_value=None), patch.object(
+            runner, "_mcp_servers", return_value={}
+        ), patch.object(runner, "_allowed_tools", return_value=[]), patch.object(
+            runner, "_max_turns", return_value=None
+        ):
+            with self.assertRaisesRegex(RuntimeError, "authentication failed"):
+                asyncio.run(
+                    runner.run(
+                        workspace_root=MagicMock(),
+                        prompt="current turn",
+                        model="claude",
+                        context=ctx,
+                    )
+                )
+
+        self.assertEqual(calls, ["current turn"])
+
+
+class ConversationHistoryBudgetTest(unittest.TestCase):
+    def test_bounded_history_prefers_recent_rounds(self) -> None:
+        from services import claude_code_runner
+
+        history = [
+            {"prompt": f"user-{i} " + ("x" * 800), "result_summary": f"assistant-{i} " + ("y" * 800)}
+            for i in range(1, 5)
+        ]
+        prompt, stats = claude_code_runner._build_bounded_conversation_prompt(  # noqa: SLF001
+            "current request",
+            history,
+            token_budget=300,
+        )
+
+        self.assertLessEqual(claude_code_runner._estimate_tokens(prompt), 300)  # noqa: SLF001
+        self.assertIn("current request", prompt)
+        self.assertIn("user-4", prompt)
+        self.assertNotIn("user-1", prompt)
+        self.assertGreaterEqual(stats["history_rounds"], 1)
+
+    def test_invalid_history_budget_uses_safe_default(self) -> None:
+        from services import claude_code_runner
+
+        with patch.dict(os.environ, {"EVOTOWN_CLAUDE_HISTORY_TOKEN_BUDGET": "invalid"}, clear=False):
+            self.assertEqual(
+                claude_code_runner._history_token_budget(),  # noqa: SLF001
+                claude_code_runner.DEFAULT_HISTORY_TOKEN_BUDGET,
+            )
 
 
 if __name__ == "__main__":
